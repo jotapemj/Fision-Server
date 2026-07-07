@@ -1,0 +1,57 @@
+# ==== SECRETOS - JAMAS AL GIT ====
+token/
+**/token/
+*.token
+token.txt
+.env
+*.key
+*.pem
+secrets.*
+
+# ==== ENTORNOS VIRTUALES ====
+venv/
+venv310/
+venv313/
+env/
+.venv/
+
+# ==== CACHE PYTHON ====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# ==== SUBMODULO (va aparte) ====
+BTC-ISMIR19/
+
+# ==== DATA DEL SERVER (pesada, crece) ====
+library/
+testing/
+
+# ==== BACKUPS ====
+old/
+**/old/
+*_full.txt
+
+# ==== MODELOS Y PESOS ====
+*.pt
+*.ckpt
+*.pth
+*.onnx
+*.safetensors
+
+# ==== AUDIO Y SALIDAS ====
+*.wav
+*.mp3
+*.flac
+*.lab
+*.mid
+*.beats
+!resources/metronome.wav
+
+# ==== SO / EDITOR ====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
