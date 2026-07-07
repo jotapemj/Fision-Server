@@ -1,0 +1,3 @@
+[submodule "BTC-ISMIR19"]
+	path = BTC-ISMIR19
+	url = https://github.com/jotapemj/BTC-ISMIR19.git
