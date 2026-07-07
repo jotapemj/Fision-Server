@@ -5,16 +5,12 @@ stems (vocals, bass, drums, guitar, piano, winds…), detects **beats** and
 **downbeats**, extracts **chords**, and renders **metronomes** and cover art —
 all on your own machine. No cloud, no accounts, your music stays yours.
 
-The philosophy is the same as [Immich](https://immich.app): your data, your
-server. A mobile app talks to a small server on your PC; the heavy GPU work
-never leaves home.
-
 > **Status:** in active development. Runs, but rough edges remain — see each
 > module's "pending" notes.
 
 ## Architecture
 
-Three pieces, two repos:
+Three pieces:
 
 ```
   ┌─────────────────┐        HTTP + Bearer token         ┌──────────────────────┐
@@ -34,8 +30,7 @@ Three pieces, two repos:
   hash-based library so the same song is never processed twice. This is the
   main entry point. See [`fision_server/README.md`](fision_server/README.md).
 - **Pipeline** — the actual audio work, run as an isolated subprocess.
-- **Android app** — the client. Lives in its own repo:
-  [Fision Android](https://github.com/jotapemj/Fision-Android) *(coming soon)*.
+- **Android app** — the client, in its own repo *(coming soon)*.
 
 ## What the pipeline does
 
@@ -43,15 +38,15 @@ Three pieces, two repos:
   vocals / instrumental, HTDemucs `ft` gives bass/drums, HTDemucs `6s` gives
   guitar/piano, an MDX23C drum-separator can split the kit, and a wind model
   pulls brass/woodwinds. `other` is always derived by subtraction.
-- **Beats & downbeats** — [beat_this](https://github.com/CPJKU/beat_this)
-  (ISMIR 2024), on CPU, in parallel with the GPU separation.
-- **Chords** — [BTC](https://github.com/jotapemj/BTC-ISMIR19) (a Transformer
-  chord-recognition model), large vocabulary (170 chords), as a git submodule.
+- **Beats & downbeats** — beat_this (ISMIR 2024), on CPU, in parallel with the
+  GPU separation.
+- **Chords** — BTC, a Transformer chord-recognition model, large vocabulary
+  (170 chords), included as a git submodule.
 
 ## Install
 
 ```bash
-# 1. Clone WITH submodules (BTC lives as a submodule)
+# 1. Clone WITH submodules (BTC lives as a submodule, weights included)
 git clone --recurse-submodules https://github.com/jotapemj/Fision.git
 cd Fision
 # (if you forgot --recurse-submodules)
@@ -74,9 +69,9 @@ pip install -r requirements.txt
 ### Model weights
 
 The separation models are downloaded automatically by `audio-separator` on
-first run. The **BTC chord model** weights are not in git (too large): place
-`btc_model_large_voca.pt` under `BTC-ISMIR19/test/`. See the BTC repo for the
-download link.
+first run. The **BTC chord model** weights ship inside the submodule
+(`BTC-ISMIR19/test/btc_model_large_voca.pt`), so a recursive clone already has
+everything — nothing else to download.
 
 ## Usage
 
@@ -112,12 +107,9 @@ python headless_fision_CLI.py <input_audio> <output_dir> [config.json]
 
 ## Credits & licenses
 
-- **Separation models** served via
-  [audio-separator](https://github.com/nomadkaraoke/python-audio-separator)
-  (UVR / MDX / Demucs family).
+- **Separation models** served via `audio-separator` (UVR / MDX / Demucs family).
 - **beat_this** — Foscarin, Schlüter, Widmer (CPJKU, ISMIR 2024).
 - **BTC** — Jonggwon Park et al., *A Bi-Directional Transformer for Musical
-  Chord Recognition* (ISMIR 2019), MIT license; used via a
-  [compatibility fork](https://github.com/jotapemj/BTC-ISMIR19).
+  Chord Recognition* (ISMIR 2019), MIT license; used via a compatibility fork.
 
 Each model keeps its own license; check upstream before redistribution.
