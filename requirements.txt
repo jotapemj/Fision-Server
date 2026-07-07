@@ -1,0 +1,41 @@
+# ==========================================================================
+# Fision - requirements
+#
+# Install PyTorch SEPARATELY, first, with the correct CUDA index. Installing
+# torch from here would pull the CPU build (slow). For a modern GPU
+# (e.g. RTX 4060 Ti):
+#
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+#
+# (adjust cu128 to your CUDA version). THEN:  pip install -r requirements.txt
+#
+# System dependencies (not pip):
+#   sudo apt install ffmpeg python3-tk
+#   (ffmpeg -> audio-separator and pydub ; python3-tk -> the desktop GUI)
+# ==========================================================================
+
+# ---- Server (FastAPI) ----
+fastapi
+uvicorn[standard]
+python-multipart
+
+# ---- Audio metadata (tags/cover) ----
+mutagen
+
+# ---- Stem separation (GPU engine) ----
+audio-separator
+onnxruntime-gpu
+
+# ---- Beats (beat_this, official CPJKU fork) ----
+beat-this @ git+https://github.com/CPJKU/beat_this.git
+
+# ---- Audio / IO ----
+soundfile
+pydub
+numpy
+
+# ---- BTC submodule deps (chords) ----
+librosa
+mir_eval
+pretty_midi
+PyYAML
