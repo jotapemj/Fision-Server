@@ -1,80 +1,89 @@
-# Fision AI · Servidor
+# Fision · Server
 
-Servidor self-hosted que recibe audio desde la app movil, lo procesa con el
-pipeline de Fision y guarda los resultados en una "biblioteca" en tu PC, para
-volver a descargarlos sin reprocesar.
+> Server module of Fision. For the full project (pipeline, GUI, CLI,
+> installation and models), see the **root README**.
+
+Self-hosted server that receives audio from the mobile app, processes it with
+the Fision pipeline (stem separation, beat/downbeat and chord detection, cover
+art and metronomes) and stores the results in a "library" on your PC, so you can
+download them again without reprocessing.
 
 ## Idea
 
-- La peticion HTTP **no espera** el proceso largo (evita el corte de ~100s de
-  Cloudflare): encola y devuelve un `job_id`. El movil pregunta el estado.
-- **Un worker** procesa de una en una (la GPU no hace dos a la vez).
-- **Biblioteca por hash**: `library/<sha256>/`. Un audio = un hash = un resultado.
-  Reprocesar con otra config hace **override** (la ultima manda).
-- **Atomico**: se procesa en `stems_tmp/` y solo si sale bien se hace el cambio.
-  Un reproceso fallido o cancelado **no** destruye lo que ya tenias.
+- The HTTP request **does not wait** for the long process (avoids Cloudflare's
+  ~100s timeout): it enqueues and returns a `job_id`. The phone polls the status.
+- **One worker** processes one at a time (the GPU won't do two at once).
+- **Library by hash**: `library/<sha256>/`. One audio = one hash = one result.
+  Reprocessing with a different config **overrides** it (the last one wins).
+- **Atomic**: work happens in `stems_tmp/` and the swap only happens if it
+  succeeds. A failed or cancelled reprocess does **not** destroy what you had.
 
-## Estructura en disco
+## On-disk layout
 
 ```
 library/<hash>/
-    input.<ext>     audio original (semilla para reprocesar sin reenviar)
-    meta.json       nombre real, config vigente, estado, fecha
-    stems/          separacion vigente
-    result.zip      zip de la separacion vigente
+    input.<ext>     original audio (seed to reprocess without re-uploading)
+    meta.json       real name, current config, state, date
+    stems/          current separation
+    result.zip      zip of the current separation
 ```
 
-## Arrancar
+## Running
+
+Dependencies are installed from the **root repo** (the server shares its
+environment with the pipeline: torch, audio-separator, beat_this, BTC). Follow
+the root README to install PyTorch (CUDA index), ffmpeg and `requirements.txt`.
 
 ```bash
-pip install -r requirements.txt
-
-export FISION_TOKEN="pon-un-token-largo-aqui"     # Bearer que pide la app
-export FISION_LIBRARY="/ruta/a/library"           # donde guardar (def: ./library)
-export FISION_CLI="python fision_cli.py"          # tu orquestador CLI
+export FISION_TOKEN="put-a-long-token-here"       # Bearer the app must send
+export FISION_LIBRARY="/path/to/library"          # storage (default: ./library)
+# FISION_CLI is optional: it already defaults to headless_fision_CLI.py
+# export FISION_CLI="python headless_fision_CLI.py"
 
 python -m fision_server.run
-# o: uvicorn fision_server.app:app --host 0.0.0.0 --port 8000
+# or: uvicorn fision_server.app:app --host 0.0.0.0 --port 8000
 ```
 
-### Contrato del CLI (lo que debe cumplir tu orquestador)
+### CLI contract (what the orchestrator must fulfil)
 
-El servidor lo invoca como subproceso:
+The server invokes it as a subprocess:
 
 ```
 <FISION_CLI> <input_audio> <output_stems_dir> <config.json>
 ```
 
-Debe dejar los `.wav` en `output_stems_dir` y devolver codigo 0 si todo fue bien.
-(`config.json` lleva el mismo dict que ya produce la GUI.)
+It leaves the stems (`.flac`) in `output_stems_dir` along with `beats.txt`,
+`downbeats.txt`, `chords*.txt`, the cover `artcover.png` and the metronomes, and
+returns exit code 0 on success. (`config.json` carries the same dict the GUI
+already produces.)
 
 ## Endpoints
 
-| Metodo | Ruta                          | Que hace                                   |
-|--------|-------------------------------|--------------------------------------------|
-| POST   | `/jobs`                       | sube audio + `config_json` -> encola o cache |
-| POST   | `/library/{hash}/reprocess`   | reprocesa el input guardado con nueva config |
-| GET    | `/jobs/{job_id}`              | estado del trabajo                          |
-| DELETE | `/jobs/{job_id}`              | cancela (en cola o en marcha)               |
-| GET    | `/library`                    | lista de canciones ("mi nube")              |
-| GET    | `/library/{hash}`             | meta de una cancion                         |
-| GET    | `/library/{hash}/zip`         | descarga el `result.zip` vigente            |
-| DELETE | `/library/{hash}`             | borra la entrada entera                     |
+| Method | Path                          | What it does                                 |
+|--------|-------------------------------|----------------------------------------------|
+| POST   | `/jobs`                       | upload audio + `config_json` -> enqueue/cache |
+| POST   | `/library/{hash}/reprocess`   | reprocess the stored input with a new config |
+| GET    | `/jobs/{job_id}`              | job status                                   |
+| DELETE | `/jobs/{job_id}`              | cancel (queued or running)                   |
+| GET    | `/library`                    | list of songs ("my cloud")                   |
+| GET    | `/library/{hash}`             | metadata of one song                         |
+| GET    | `/library/{hash}/zip`         | download the current `result.zip`            |
+| DELETE | `/library/{hash}`             | delete the whole entry                       |
 
-Todas piden `Authorization: Bearer <FISION_TOKEN>` (si el token esta vacio,
-modo abierto solo para pruebas en local).
+All require `Authorization: Bearer <FISION_TOKEN>` (if the token is empty,
+open mode, for local testing only).
 
-## Exponerlo (elige UNA via, documentada en el repo)
+## Exposing it (pick ONE way, documented in the repo)
 
-- **Solo LAN**: nada que abrir. Uso en casa.
-- **Tailscale** (recomendado, sencillo): `http://tupc:8000`. Cero exposicion publica.
-- **Cloudflare Tunnel**: URL publica. Anade Cloudflare Access + el token Bearer.
-- **WireGuard**: control total, abres un puerto UDP (mudo a desconocidos).
+- **LAN only**: nothing to open. Home use.
+- **Tailscale** (recommended, simple): `http://yourpc:8000`. Zero public exposure.
+- **Cloudflare Tunnel**: public URL. Add Cloudflare Access + the Bearer token.
+- **WireGuard**: full control, you open a UDP port (silent to strangers).
 
-El token Bearer va **siempre**, este detras de lo que este. Defensa en profundidad.
+The Bearer token goes **always**, whatever it sits behind. Defense in depth.
 
-## Pendiente / ideas v2
+## Pending / v2 ideas
 
-- Limpieza de biblioteca (tope de tamano, borrar viejos).
-- Persistir la cola en disco (ahora los jobs en vuelo viven en memoria).
-- Hash del audio decodificado (mismo audio en mp3/wav = mismo hash).
+- Library cleanup (size cap, delete old entries).
+- Persist the queue on disk (in-flight jobs currently live in memory).
+- Hash the decoded audio (same audio as mp3/wav = same hash).
