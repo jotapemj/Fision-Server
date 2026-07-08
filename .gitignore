@@ -23,7 +23,7 @@ __pycache__/
 *.egg-info/
 
 # ==== SUBMODULO (va aparte) ====
-BTC-ISMIR19/
+#BTC-ISMIR19/
 
 # ==== DATA DEL SERVER (pesada, crece) ====
 library/

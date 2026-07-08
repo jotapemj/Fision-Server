@@ -189,6 +189,9 @@ class FisionApp(tk.Tk):
         self.input_file = tk.StringVar(value="")
         self.device     = tk.StringVar(value="cpu")
         self.ask_out    = tk.BooleanVar(value=ASK_OUTPUT_DIR_DEFAULT)
+        # Guardar en la biblioteca por hash, igual que el servidor (cache compartida).
+        self.save_server = tk.BooleanVar(value=False)
+        self._server_hash = None
 
         # --- Estado de separacion -------------------------------------------
         # Grupo activo: "classic" | "personalized". Excluyentes.
@@ -353,6 +356,11 @@ class FisionApp(tk.Tk):
                         variable=self.ask_out, style="TCheckbutton",
                         takefocus=False).grid(row=9, column=0, sticky="w",
                                               pady=(16, 0))
+
+        ttk.Checkbutton(card, text="Guardar como el servidor (biblioteca por hash)",
+                        variable=self.save_server, style="TCheckbutton",
+                        takefocus=False).grid(row=10, column=0, sticky="w",
+                                              pady=(6, 0))
 
         # boton procesar (debajo de la tarjeta, ancho completo de la columna)
         self.go_btn = ttk.Button(left, text="▶   Procesar", style="Accent.TButton",
@@ -607,14 +615,22 @@ class FisionApp(tk.Tk):
         sep_config = self._collect_sep_config()
 
         # carpeta de salida
-        if self.ask_out.get():
-            out = filedialog.askdirectory(title="Elegir carpeta de salida")
-            if not out:
-                return
+        if self.save_server.get():
+            # Modo servidor: biblioteca por hash (fuente unica en library.py).
+            from fision_server import library as _lib
+            h, tmp_stems = _lib.prepare_entry(path)
+            out = str(tmp_stems)
+            self._server_hash = h
         else:
-            p = Path(path)
-            out = str(p.parent / p.stem)
-        os.makedirs(out, exist_ok=True)
+            self._server_hash = None
+            if self.ask_out.get():
+                out = filedialog.askdirectory(title="Elegir carpeta de salida")
+                if not out:
+                    return
+            else:
+                p = Path(path)
+                out = str(p.parent / p.stem)
+            os.makedirs(out, exist_ok=True)
         self.last_out_dir = out
 
         # bloquear UI y arrancar
@@ -637,12 +653,14 @@ class FisionApp(tk.Tk):
         self.capture = OutputCapture(self.log_q)
         self.capture.start()
 
-        args = (path, out, self.device.get(), sep_config)
+        args = (path, out, self.device.get(), sep_config,
+                bool(self.save_server.get()), self._server_hash)
         self.worker = threading.Thread(target=self._run_pipeline_thread,
                                        args=args, daemon=True)
         self.worker.start()
 
-    def _run_pipeline_thread(self, path, out, device, sep_config):
+    def _run_pipeline_thread(self, path, out, device, sep_config,
+                             save_server=False, server_hash=None):
         ok, err = True, ""
         try:
             print("Inicializando motor (la primera carga puede tardar)...")
@@ -650,10 +668,25 @@ class FisionApp(tk.Tk):
             run_pipeline(path, out, device=device,
                          sep_config=sep_config,
                          on_proc=self._register_proc)
+
+            # Modo servidor: commit atomico + meta.json (fuente unica en library.py).
+            if save_server and server_hash and not self.cancel_requested:
+                from fision_server import library as _lib
+                _lib.finalize_entry(server_hash, Path(out), sep_config,
+                                    os.path.basename(path))
+                self.last_out_dir = str(_lib.stems_dir(server_hash))  # abrir carpeta final
+                print(f"\n[biblioteca] guardado como {server_hash}")
         except Exception:
             ok = False
             err = traceback.format_exc()
             print("\n" + err)
+            # Si fallo en modo servidor, tira el temporal (lo vigente queda intacto).
+            if save_server and server_hash:
+                try:
+                    from fision_server import library as _lib
+                    _lib.discard_tmp(server_hash)
+                except Exception:
+                    pass
         finally:
             self.log_q.put({"__event__": "done", "ok": ok, "error": err})
 

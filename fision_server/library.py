@@ -146,3 +146,54 @@ def delete_entry(h):
     d = entry_dir(h)
     if d.exists():
         shutil.rmtree(d)
+
+
+# ------------------------------------------------- guardar como el server ----
+# Fuente unica para "procesar y guardar en la biblioteca". La usan la GUI y el
+# CLI (modo --save-server) para no duplicar la logica del worker del servidor.
+
+def prepare_entry(input_file):
+    """Hashea el input, crea library/<hash>/, copia el input (semilla) y
+    devuelve (hash, stems_tmp_path) listo para que el pipeline escriba ahi."""
+    h = hash_file(input_file)
+    d = entry_dir(h)
+    d.mkdir(parents=True, exist_ok=True)
+    ext = os.path.splitext(input_file)[1].lower() or ".bin"
+    dst_in = d / f"input{ext}"
+    if not dst_in.exists():
+        shutil.copy2(input_file, dst_in)      # semilla para reprocesar
+    tmp = d / "stems_tmp"
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    return h, tmp
+
+
+def finalize_entry(h, tmp_stems, cfg, nombre):
+    """Commit atomico (stems/ + result.zip) y meta.json = 'listo'.
+
+    Mismo formato de meta que el servidor: title/artist de las tags, cover_url,
+    created_at (solo la 1a vez) y updated_at.
+    """
+    from datetime import datetime, timezone
+    commit_result(h, Path(tmp_stems))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    title, artist = read_tags(input_path(h))
+    meta = read_meta(h) or {"hash": h}
+    meta.setdefault("created_at", now)
+    meta.update({
+        "hash": h,
+        "nombre": nombre,
+        "config": cfg,
+        "estado": "listo",
+        "updated_at": now,
+        "title": title or Path(nombre).stem,
+        "artist": artist or "",
+        "cover_url": cover_url(h),
+    })
+    write_meta(h, meta)
+    return h
+
+
+def discard_tmp(h):
+    """Tira stems_tmp/ tras un fallo/cancelacion. Lo vigente queda intacto."""
+    shutil.rmtree(entry_dir(h) / "stems_tmp", ignore_errors=True)
