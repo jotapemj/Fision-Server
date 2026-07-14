@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-from . import config, library, jobs, users, security, log
+from . import config, library, jobs, users, security, log, avatars
 from .auth import current_user, bearer_token
 
 
@@ -100,6 +100,54 @@ def change_password(body: ChangePwIn, user: str = Depends(current_user)):
     token = security.issue(user)                  # el cambio mato el token viejo
     log.event("password_change.success", user=user)
     return {"ok": True, "token": token}
+
+
+# ---------------------------------------------------------------- avatar ----
+@app.get("/auth/avatar")
+def avatar_get(user: str = Depends(current_user)):
+    p = avatars.path_for(user)
+    if not p:
+        raise HTTPException(404, "Sin avatar")
+    return FileResponse(p, media_type=avatars.media_type(p.suffix))
+
+
+@app.put("/auth/avatar")
+async def avatar_put(file: UploadFile = File(...),
+                     user: str = Depends(current_user)):
+    limit = config.MAX_AVATAR_MB * 1024 * 1024
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    size = 0
+    head = b""
+    try:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            if not head:
+                head = chunk[:16]                       # magic bytes vienen al principio
+            size += len(chunk)
+            if size > limit:
+                tmp.close(); os.remove(tmp.name)
+                raise HTTPException(413, "Imagen demasiado grande")
+            tmp.write(chunk)
+    finally:
+        tmp.close()
+
+    ext = avatars.sniff_ext(head)
+    if not ext:
+        os.remove(tmp.name)
+        raise HTTPException(400, "Formato no soportado (usa JPEG/PNG/WebP)")
+
+    avatars.save(user, tmp.name, ext)
+    log.event("avatar.set", user=user)
+    return {"ok": True}
+
+
+@app.delete("/auth/avatar")
+def avatar_delete(user: str = Depends(current_user)):
+    avatars.delete(user)
+    log.event("avatar.delete", user=user)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- helpers ----

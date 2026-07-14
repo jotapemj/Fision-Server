@@ -33,6 +33,8 @@ def cli_command(input_path, out_dir, config_json):
 HOST = os.environ.get("FISION_HOST", "0.0.0.0")
 PORT = int(os.environ.get("FISION_PORT", "8000"))
 MAX_UPLOAD_MB = int(os.environ.get("FISION_MAX_UPLOAD_MB", "200"))
+# Tope aparte para avatares. Nada de reutilizar el del audio.
+MAX_AVATAR_MB = int(os.environ.get("FISION_MAX_AVATAR_MB", "2"))
 
 LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -45,6 +47,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 USERS_FILE = DATA_DIR / "users.json"     # store de usuarios (hash de password)
 SECRET_FILE = DATA_DIR / "secret.key"    # clave para firmar tokens (auto-generada)
 QUEUE_FILE = DATA_DIR / "queue.json"     # cola persistida (sobrevive reinicios)
+AVATARS_DIR = DATA_DIR / "avatars"       # foto de perfil por usuario
+AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Duracion del token de sesion. 720h = 30 dias (comodo para app movil).
 TOKEN_TTL_HOURS = int(os.environ.get("FISION_TOKEN_TTL_HOURS", "720"))

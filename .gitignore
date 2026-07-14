@@ -56,3 +56,6 @@ old/
 Thumbs.db
 .vscode/
 .idea/
+
+# ==== BITACORA LOCAL DE CLAUDE (NO SUBIR) ====
+CLAUDE.md
