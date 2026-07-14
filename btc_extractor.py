@@ -51,7 +51,9 @@ def main(file_path, carpeta):
     # --- Modelo ---
     model = BTC_model(config=config.model).to(device)
     if os.path.isfile(model_file):
-        checkpoint = torch.load(model_file, map_location=device)
+        # weights_only=False: desde torch 2.6 el default es True y rompe la carga
+        # del checkpoint de BTC (es un dict con mean/std/model, no solo tensores).
+        checkpoint = torch.load(model_file, map_location=device, weights_only=False)
         mean = checkpoint['mean']
         std = checkpoint['std']
         model.load_state_dict(checkpoint['model'])

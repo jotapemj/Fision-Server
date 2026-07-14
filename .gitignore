@@ -28,6 +28,7 @@ __pycache__/
 # ==== DATA DEL SERVER (pesada, crece) ====
 library/
 testing/
+fision_server/data/
 
 # ==== BACKUPS ====
 old/

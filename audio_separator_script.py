@@ -57,8 +57,20 @@ SILENCE_THRESHOLD = 1e-4   # por debajo de esto consideramos "silencio" -> se ti
 
 # ------------------------------------------------------------- HELPERS FS ----
 def _glob_kw(output_dir, keyword):
-    """Ficheros .flac que contienen 'keyword' (los parentesis evitan colisiones)."""
-    return glob.glob(os.path.join(output_dir, f"*{keyword}*.flac"))
+    """Ficheros .flac cuyo nombre contiene 'keyword', SIN distinguir mayusculas.
+
+    audio-separator cambia la capitalizacion de los stems entre versiones
+    ('(Other)' en unas, '(other)' en otras). En Windows el glob es insensible y
+    colaba por accidente; en Linux es sensible y no encontraba nada.
+    Comparamos en minusculas para que funcione en ambos.
+
+    Los parentesis del keyword siguen evitando colisiones:
+      - '(Woodwinds)' NO casa con '(No Woodwinds)'
+      - '(Vocals)'    NO casa con 'vocals.flac' (ya renombrado, sin parentesis)
+    """
+    kw = keyword.lower()
+    return sorted(f for f in glob.glob(os.path.join(output_dir, "*.flac"))
+                  if kw in os.path.basename(f).lower())
 
 
 def rename_and_clean(output_dir, keyword, new_name):
@@ -162,16 +174,16 @@ def build_separator(output_dir):
     return Separator(
         output_dir=output_dir,
         output_format="FLAC",
-        use_autocast=False,            # fp32: en Pascal fp16 va lentisimo
+        use_autocast=True,            # fp32: en Pascal fp16 va lentisimo
         mdxc_params={                  # solo afecta a los RoFormer (MDXC)
-            "segment_size": 256,
+            "segment_size": 512,
             "override_model_segment_size": False,
             "overlap": 4,
-            "batch_size": 4,
+            "batch_size": 24,
             "pitch_shift": 0,
         },
         demucs_params={                # solo afecta a HTDemucs
-            "shifts": 2,               # default 2. baja a 1 para casi el doble de velocidad
+            "shifts": 4,               # default 2. baja a 1 para casi el doble de velocidad
             "overlap": 0.5,
             "segments_enabled": True,
         },

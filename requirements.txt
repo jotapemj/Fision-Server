@@ -18,6 +18,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
+argon2-cffi
+PyJWT
 
 # ---- Audio metadata (tags/cover) ----
 mutagen
