@@ -96,7 +96,6 @@ All configuration is read from environment variables.
 | `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size.                               |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 
-`FISION_TOKEN` (the legacy static Bearer token) is **deprecated** and ignored.
 
 ## Authentication and user management
 
