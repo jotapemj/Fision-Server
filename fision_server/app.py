@@ -29,14 +29,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-from . import config, library, jobs, users, security, log, avatars
+from . import config, library, jobs, users, security, log, avatars, gpu
 from .auth import current_user, bearer_token
 
 
 @asynccontextmanager
 async def lifespan(app):
     log.setup()
-    log.event("server.start")
+    gpu.detect()                      # una unica deteccion; el cache vive todo el arranque
+    info = gpu.info()
+    log.event("server.start", gpu=info["gpu"], gpu_name=info["gpu_name"],
+              vram_total_mb=info["vram_total_mb"])
     jobs.recover()                    # recupera cola y limpia huerfanas tras caida
     jobs.start_worker()
     yield
@@ -64,6 +67,13 @@ async def access_log(request: Request, call_next):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# --------------------------------------------------------------- server info ----
+@app.get("/server/info")
+def server_info(user: str = Depends(current_user)):
+    """Info cacheada al arrancar. El cliente decide device (cuda/cpu) con esto."""
+    return gpu.info()
 
 
 # ------------------------------------------------------------------- auth ----

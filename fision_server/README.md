@@ -94,6 +94,10 @@ All configuration is read from environment variables.
 | `FISION_HOST`            | `0.0.0.0`                | Bind address.                                      |
 | `FISION_PORT`            | `8000`                   | Bind port.                                         |
 | `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size.                               |
+| `FISION_MAX_AVATAR_MB`   | `2`                      | Maximum avatar upload size.                        |
+| `FISION_GPU_MIN_VRAM_MB` | `4096`                   | Minimum free VRAM required to start a CUDA job.    |
+| `FISION_GPU_POLL_SEC`    | `30`                     | Poll interval while a job waits for free VRAM.     |
+| `FISION_GPU_WAIT_TIMEOUT_SEC` | `600`               | Hard timeout waiting for VRAM; aborts the job.     |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 
 
@@ -127,7 +131,11 @@ All routes except `/health` and `/login` require `Authorization: Bearer <token>`
 |--------|-------------------------------|-------------------------------------------------|
 | POST   | `/login`                      | Exchange username + password for a token.       |
 | POST   | `/auth/change-password`       | Change the password; returns a fresh token.     |
+| GET    | `/auth/avatar`                | Serve the caller's avatar image. 404 if unset.  |
+| PUT    | `/auth/avatar`                | Upload avatar (multipart `file`, JPEG/PNG/WebP).|
+| DELETE | `/auth/avatar`                | Delete the caller's avatar.                     |
 | GET    | `/health`                     | Connectivity probe (no token).                  |
+| GET    | `/server/info`                | GPU capabilities of the host (cached).          |
 | POST   | `/jobs`                       | Upload audio + `config_json`; enqueue or cache. |
 | POST   | `/library/{hash}/reprocess`   | Reprocess the stored input with a new config.   |
 | GET    | `/jobs`                       | Live queue for the caller (global position).    |
@@ -152,17 +160,70 @@ It writes the stems (`.flac`) into `output_stems_dir` together with `beats.txt`,
 returns exit code 0 on success. All temporary output must stay inside the
 provided directory so interrupted runs can be cleaned up safely.
 
+## Hardware detection and GPU gating
+
+The server is the single source of truth for GPU availability. At startup it
+queries `nvidia-smi` once and caches the result; clients read that snapshot from
+`GET /server/info` and decide which `device` to request per job.
+
+```json
+GET /server/info
+{
+  "gpu": true,
+  "gpu_name": "NVIDIA GeForce RTX 3060",
+  "vram_total_mb": 12288,
+  "driver": "550.54.15"
+}
+```
+
+When `gpu` is `false`, the other fields are empty. `nvidia-smi` is queried
+without loading PyTorch, so the endpoint is cheap and does not warm up CUDA.
+
+Jobs may include `"device": "cuda"` in the config. Before executing such a job
+the worker checks live free VRAM against `FISION_GPU_MIN_VRAM_MB` (default
+4096 MB). If not enough is free, the job moves to the `waiting_gpu` state,
+free VRAM is polled every `FISION_GPU_POLL_SEC` seconds (default 30), and the
+job resumes as soon as the threshold is met. If `FISION_GPU_WAIT_TIMEOUT_SEC`
+elapses (default 600), the job is aborted with `GPU ocupada`. If the host has
+no GPU at all, a job that requested `cuda` is silently downgraded to `cpu` so
+processing still completes.
+
+Job states exposed to clients: `queued`, `running`, `waiting_gpu`, `done`,
+`error`, `cancelled`. A `waiting_gpu` job counts as position `0` in the queue
+and can be cancelled the same way as a running one.
+
+## Avatars
+
+Each account may upload one profile image (JPEG, PNG or WebP; SVG is rejected).
+The client is responsible for cropping and resizing; the server stores the file
+verbatim under `data/avatars/<user>.<ext>`, where the extension is detected
+from the file's magic bytes rather than trusted from the request. Uploading a
+new avatar replaces the previous one, even across formats.
+
+```
+GET    /auth/avatar          -> image/*, 404 if none
+PUT    /auth/avatar          -> multipart 'file'; 413 if >FISION_MAX_AVATAR_MB, 400 if not JPEG/PNG/WebP
+DELETE /auth/avatar          -> removes the avatar
+```
+
 ## Logging
 
 Logs are written to stdout, ready for journald or Docker. Two grep-friendly
 prefixes are emitted:
 
 ```
+... AUDIT  server.start gpu=True gpu_name=NVIDIA GeForce RTX 3060 vram_total_mb=12288
 ... AUDIT  user.create user=alice
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials
 ... AUDIT  password_change.success user=alice
+... AUDIT  avatar.set user=alice
+... AUDIT  avatar.delete user=alice
 ... AUDIT  queue.recover recovered=1 swept=2
+... AUDIT  job.waiting_gpu job_id=ab12cd34ef56
+... AUDIT  job.gpu_ready   job_id=ab12cd34ef56
+... AUDIT  job.gpu_timeout job_id=ab12cd34ef56
+... AUDIT  job.gpu_fallback job_id=ab12cd34ef56 reason=no_gpu
 ... ACCESS user=alice POST /jobs 200 143ms
 ```
 

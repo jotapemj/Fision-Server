@@ -26,13 +26,14 @@ atomico. Un reproceso fallido o cancelado NO destruye el resultado vigente.
 """
 import os
 import json
+import time
 import uuid
 import shutil
 import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
-from . import config, library, pipeline, log
+from . import config, library, pipeline, log, gpu
 
 _jobs = {}                       # job_id -> dict
 _pending = []                    # ids en orden de llegada (los 'queued')
@@ -62,7 +63,7 @@ def _persist():
     """Vuelca la cola viva (running + queued) a queue.json. Llamar con el lock."""
     items = []
     cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
-    if cur and cur["estado"] == "running":
+    if cur and cur["estado"] in ("running", "waiting_gpu"):
         items.append({k: cur.get(k) for k in _PERSIST_KEYS})
     for jid in _pending:
         j = _jobs.get(jid)
@@ -127,7 +128,7 @@ def queue_position(jid, user=None):
         job = _jobs.get(jid)
         if not _owned(job, user):
             return None
-        if job["estado"] == "running":
+        if job["estado"] in ("running", "waiting_gpu"):
             return 0
         if job["estado"] != "queued":
             return None
@@ -146,9 +147,9 @@ def list_active(user):
     with _cond:
         out = []
         cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
-        if cur and cur["estado"] == "running" and cur.get("user") == user:
+        if cur and cur["estado"] in ("running", "waiting_gpu") and cur.get("user") == user:
             out.append({"job_id": cur["job_id"], "hash": cur["hash"],
-                        "nombre": cur["nombre"], "estado": "running",
+                        "nombre": cur["nombre"], "estado": cur["estado"],
                         "posicion": 0})
         pos = 0
         for pid in _pending:
@@ -173,7 +174,7 @@ def cancel_job(jid, user=None):
             job["estado"] = "cancelled"
             revert = (job["user"], job["hash"])
             _persist()
-        elif job["estado"] == "running" and _current["job_id"] == jid:
+        elif job["estado"] in ("running", "waiting_gpu") and _current["job_id"] == jid:
             job["estado"] = "cancelled"
             proc = _current["proc"]
             if proc:
@@ -181,6 +182,8 @@ def cancel_job(jid, user=None):
                     proc.terminate()
                 except Exception:
                     pass
+            # Si estaba en waiting_gpu no hay proc: el bucle de espera detecta
+            # el cambio a "cancelled" y sale limpio.
             return True                      # el worker limpia y persiste al caer
         else:
             return False
@@ -249,6 +252,59 @@ def recover():
             _cond.notify()
 
 
+# ------------------------------------------------------------------ GPU ----
+def _wants_gpu(cfg):
+    """Formato rico del cliente lleva 'device'. Plano no -> asume CPU."""
+    return isinstance(cfg, dict) and cfg.get("device") == "cuda"
+
+
+def _force_cpu(cfg):
+    """Degrada device a cpu (server sin GPU). Copia defensiva del dict."""
+    if isinstance(cfg, dict) and cfg.get("device") == "cuda":
+        cfg = dict(cfg)
+        cfg["device"] = "cpu"
+    return cfg
+
+
+def _wait_for_gpu(jid):
+    """Espera a que haya VRAM libre >= GPU_MIN_VRAM_MB.
+
+    True si llega a tiempo, False si timeout o cancelacion. Marca el job como
+    'waiting_gpu' mientras espera; lo devuelve a 'running' cuando pasa.
+    """
+    if gpu.vram_free_mb() >= config.GPU_MIN_VRAM_MB:
+        return True                             # camino rapido: VRAM libre al primer intento
+
+    deadline = time.time() + config.GPU_WAIT_TIMEOUT_SEC
+    with _cond:
+        job = _jobs.get(jid)
+        if not job or job["estado"] == "cancelled":
+            return False
+        job["estado"] = "waiting_gpu"
+        _persist()
+    log.event("job.waiting_gpu", job_id=jid)
+
+    while True:
+        # Cancelacion durante la espera -> salir limpio.
+        with _cond:
+            job = _jobs.get(jid)
+            if not job or job["estado"] == "cancelled":
+                return False
+        if time.time() >= deadline:
+            log.event("job.gpu_timeout", job_id=jid)
+            return False
+        time.sleep(config.GPU_POLL_SEC)
+        if gpu.vram_free_mb() >= config.GPU_MIN_VRAM_MB:
+            with _cond:
+                job = _jobs.get(jid)
+                if not job or job["estado"] == "cancelled":
+                    return False
+                job["estado"] = "running"
+                _persist()
+            log.event("job.gpu_ready", job_id=jid)
+            return True
+
+
 # ----------------------------------------------------------------- worker ----
 def _next_job():
     with _cond:
@@ -282,9 +338,23 @@ def _worker():
             _current["job_id"] = jid
             _current["proc"] = None
             _persist()                        # queda registrado como 'running'
+
         tmp_stems = lib.entry_dir(h) / "stems_tmp"
 
         try:
+            # Degrada silenciosamente si el cliente pidio cuda pero el server
+            # no tiene GPU (o la deteccion fallo). El pipeline sigue en CPU.
+            if _wants_gpu(job["config"]) and not gpu.has_gpu():
+                job["config"] = _force_cpu(job["config"])
+                log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
+
+            # Gate de VRAM: si el job pide cuda, espera a tener libre >= minimo.
+            if _wants_gpu(job["config"]):
+                if not _wait_for_gpu(jid):
+                    if _jobs.get(jid, {}).get("estado") == "cancelled":
+                        raise RuntimeError("cancelado")
+                    raise RuntimeError("GPU ocupada")
+
             if tmp_stems.exists():
                 shutil.rmtree(tmp_stems)
 

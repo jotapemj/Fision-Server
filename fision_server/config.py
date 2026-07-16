@@ -36,6 +36,14 @@ MAX_UPLOAD_MB = int(os.environ.get("FISION_MAX_UPLOAD_MB", "200"))
 # Tope aparte para avatares. Nada de reutilizar el del audio.
 MAX_AVATAR_MB = int(os.environ.get("FISION_MAX_AVATAR_MB", "2"))
 
+# ------------------------------------------------------------------- GPU ----
+# Minimo de VRAM libre para dejar arrancar un job en cuda (MB).
+GPU_MIN_VRAM_MB = int(os.environ.get("FISION_GPU_MIN_VRAM_MB", "4096"))
+# Cada cuanto revisar VRAM cuando el job esta en waiting_gpu (segundos).
+GPU_POLL_SEC = int(os.environ.get("FISION_GPU_POLL_SEC", "30"))
+# Timeout duro esperando VRAM (segundos). Si se supera -> aborta con error.
+GPU_WAIT_TIMEOUT_SEC = int(os.environ.get("FISION_GPU_WAIT_TIMEOUT_SEC", "600"))
+
 LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------- auth/data ----
