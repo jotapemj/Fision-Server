@@ -172,13 +172,18 @@ def generate_metronome(beats, duration_ms, velocity, output_dir):
 
 
 def run_beats(input_file: str, output_dir: str):
-    """Beats y downbeats con beat_this (ISMIR 2024). Sin DBN, sin madmom.
+    """Beats y downbeats con beat_this (ISMIR 2024), ensemble de checkpoints.
 
     - beats.txt    : linea 1 = tempo global (BPM). Resto = un beat por linea.
     - downbeats.txt : un downbeat por linea (formato beat_this). Cada linea
                       ES el "uno" de un compas. La app lo interpreta asi.
 
     beat_this SIEMPRE corre en CPU. La GPU queda libre para la separacion.
+    En vez de un solo checkpoint, corremos los N `finalX` publicados
+    (misma arquitectura, distinta semilla) y promediamos sus logits
+    frame-level antes del peak-picking. Coste: Nx forward CPU. Beneficio:
+    picks mas estables y sin depender de madmom (que no compila en
+    Python 3.12 + numpy 2.x, ni con parches de import).
     """
 
     info_song = pydub_utils.mediainfo(input_file)
@@ -186,12 +191,31 @@ def run_beats(input_file: str, output_dir: str):
     print("Song duration:", song_duration, "ms")
 
     # Import tardio: beat_this arrastra torch (pesado). Solo al necesitarlo.
-    from beat_this.inference import File2Beats
+    from beat_this.inference import Audio2Frames, Postprocessor, load_audio
 
-    # Forzado a CPU siempre. No aceptamos override. La GPU es para separar.
     BEAT_THIS_DEVICE = "cpu"
-    f2b = File2Beats(checkpoint_path="final0", device=BEAT_THIS_DEVICE, dbn=False)
-    beats, downbeats = f2b(input_file)
+    # Los tres checkpoints del paper: mismo modelo, distinta semilla.
+    CHECKPOINTS = ("final0", "final1", "final2")
+
+    # Cargar audio una unica vez; cada modelo hace su forward sobre el mismo.
+    signal, sr = load_audio(input_file)
+
+    beat_sum = None
+    downbeat_sum = None
+    for ckpt in CHECKPOINTS:
+        print(f"[beat_this] ensemble checkpoint {ckpt}...")
+        a2f = Audio2Frames(checkpoint_path=ckpt, device=BEAT_THIS_DEVICE)
+        b_logits, d_logits = a2f(signal, sr)
+        beat_sum = b_logits if beat_sum is None else beat_sum + b_logits
+        downbeat_sum = d_logits if downbeat_sum is None else downbeat_sum + d_logits
+
+    n = len(CHECKPOINTS)
+    beat_logits_avg = beat_sum / n
+    downbeat_logits_avg = downbeat_sum / n
+
+    # Postprocessor "minimal" = peak-picking simple, no requiere madmom.
+    post = Postprocessor(type="minimal")
+    beats, downbeats = post(beat_logits_avg, downbeat_logits_avg)
 
     # generate_metronome exige array numpy float (usa slicing y .dtype).
     beats = np.asarray(beats, dtype=float)
