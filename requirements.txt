@@ -28,8 +28,11 @@ mutagen
 audio-separator
 onnxruntime-gpu
 
-# ---- Beats (beat_this, official CPJKU fork) ----
+# ---- Beats (beat_this + madmom DBN postprocessor) ----
+# madmom master compila limpio con Cython 3 + numpy 2 + Python 3.12
+# (necesario: el PyPI 0.16.1 de 2018 esta anclado a Cython <3).
 beat-this @ git+https://github.com/CPJKU/beat_this.git
+madmom @ git+https://github.com/CPJKU/madmom.git
 
 # ---- Audio / IO ----
 soundfile

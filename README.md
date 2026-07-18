@@ -39,7 +39,12 @@ Three pieces:
   guitar/piano, an MDX23C drum-separator can split the kit, and a wind model
   pulls brass/woodwinds. `other` is always derived by subtraction.
 - **Beats & downbeats** — beat_this (ISMIR 2024), on CPU, in parallel with the
-  GPU separation.
+  GPU separation. Frame-level logits are averaged across the three published
+  checkpoints (`final0`, `final1`, `final2`) and fed into a Dynamic Bayesian
+  Network postprocessor (madmom's `DBNDownBeatTrackingProcessor`), which
+  performs joint beat and downbeat tracking with Viterbi decoding over a
+  tempo/phase state space. Time signature is auto-detected between 3/4 and
+  4/4; tempo range is 55-215 BPM.
 - **Chords** — BTC, a Transformer chord-recognition model, large vocabulary
   (170 chords), included as a git submodule.
 

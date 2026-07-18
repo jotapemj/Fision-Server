@@ -1,5 +1,3 @@
-# madmom deprecado por completo. Beats/downbeats ahora via beat_this.
-
 import os
 import sys
 import subprocess
@@ -181,9 +179,11 @@ def run_beats(input_file: str, output_dir: str):
     beat_this SIEMPRE corre en CPU. La GPU queda libre para la separacion.
     En vez de un solo checkpoint, corremos los N `finalX` publicados
     (misma arquitectura, distinta semilla) y promediamos sus logits
-    frame-level antes del peak-picking. Coste: Nx forward CPU. Beneficio:
-    picks mas estables y sin depender de madmom (que no compila en
-    Python 3.12 + numpy 2.x, ni con parches de import).
+    frame-level. Sobre ese promedio corre el Postprocessor DBN de
+    beat_this, que internamente usa el DBNDownBeatTrackingProcessor de
+    madmom (Bock et al.) para tracking global de beat + downbeat con
+    modelo Bayesiano dinamico. Esto suaviza el pulso en zonas ambiguas
+    y elimina el picks-vecinos que dejaba el peak-picking "minimal".
     """
 
     info_song = pydub_utils.mediainfo(input_file)
@@ -213,8 +213,10 @@ def run_beats(input_file: str, output_dir: str):
     beat_logits_avg = beat_sum / n
     downbeat_logits_avg = downbeat_sum / n
 
-    # Postprocessor "minimal" = peak-picking simple, no requiere madmom.
-    post = Postprocessor(type="minimal")
+    # Postprocessor "dbn" = DBNDownBeatTrackingProcessor de madmom con
+    # beats_per_bar=[3,4], min_bpm=55, max_bpm=215, transition_lambda=100
+    # (parametros por defecto de beat_this, ver postprocessor.py).
+    post = Postprocessor(type="dbn", fps=50)
     beats, downbeats = post(beat_logits_avg, downbeat_logits_avg)
 
     # generate_metronome exige array numpy float (usa slicing y .dtype).
