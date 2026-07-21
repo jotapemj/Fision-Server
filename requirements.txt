@@ -38,6 +38,13 @@ madmom @ git+https://github.com/CPJKU/madmom.git
 # Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper. Cache del
 # modelo en ~/.cache/huggingface/hub/ (se baja en primer arranque).
 faster-whisper
+# CTranslate2 no reutiliza cuBLAS/cuDNN de PyTorch: necesita los suyos.
+# Los paquetes pip de NVIDIA publican wheels Linux Y Windows con las
+# shared libs dentro de site-packages/nvidia/*/lib (o /bin en Windows).
+# Instalarlos siempre; el que corra Fision solo en CPU puede desinstalarlos
+# a mano (unos 500 MB) sin afectar al resto del stack.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
 
 # ---- Audio / IO ----
 soundfile
