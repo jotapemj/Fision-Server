@@ -12,6 +12,43 @@ import numpy as np
 import subprocess
 import re
 
+# --------------------------------------------------------- lyrics filtros ----
+# Umbrales de limpieza para las salidas de Whisper. Se aplican DESPUES de
+# obtener los segmentos del modelo. Ajustar aqui hasta encontrar el
+# equilibrio para tu tipo de musica.
+LYRICS_MIN_DURATION_S = 0.3            # segmentos mas cortos = ruido
+LYRICS_MIN_CHARS_PER_SEC = 1.0         # densidad minima texto/tiempo
+LYRICS_MAX_NO_SPEECH_PROB = 0.6        # por encima -> probablemente silencio
+LYRICS_MIN_LOGPROB = -1.0              # por debajo -> baja confianza
+
+# Palabras/onomatopeyas que si aparecen solas (o repetidas) indican que el
+# segmento es tarareo o interjeccion, no letra util.
+_LYRICS_INTERJECTIONS = {
+    "eh", "ah", "oh", "uh", "hey", "yeah", "yo", "hu", "aja", "aha",
+    "la", "na", "wa", "hm", "mm", "mhm", "uy", "ay", "ha", "he",
+}
+
+# Frases que Whisper alucina en silencios (aprendio de subtitulos YouTube y
+# fuentes con licencias/creditos). Regex case-insensitive, coinciden en el
+# texto normalizado a minusculas.
+_LYRICS_HALLUCINATION_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r"subt[ií]tulos?\s+(por|de|realizados|creados)",
+        r"subtitulado\s+por",
+        r"traducido\s+por",
+        r"amara\.org",
+        r"suscr[ií]bete\s+(al|a\s+nuestro)\s+canal",
+        r"suscr[ií]bete\s+y\s+dale",
+        r"gracias\s+por\s+ver",
+        r"ay[uú]d(a|e)(le|la|nos)?\s+a\s+(vivir|el|la|los|las)",
+        r"protejamos\s+a",
+        r"visita\s+nuestra\s+web",
+        r"www\.",
+        r"\.com\b",
+        r"\.org\b",
+    )
+]
+
 _clic_seg = AudioSegment.from_file('resources/metronome.wav')
 
 def run_metadata_extractor(input_file: str, output_dir: str):
@@ -260,6 +297,88 @@ def run_beats(input_file: str, output_dir: str):
 
 
 # ---------- LYRICS ----------
+def _is_interjection_only(text):
+    """True si el texto son solo interjecciones o vocales repetidas.
+
+    Ejemplos que dan True: "Eh eh eh", "Aaaa", "La la la", "Oh oh".
+    Ejemplo que da False: "No" (una palabra normal). El criterio es que
+    TODOS los tokens sean interjecciones conocidas o una sola letra repetida.
+    """
+    tokens = re.findall(r"[a-záéíóúñü]+", text.lower())
+    if not tokens:
+        return True                             # texto sin letras -> basura
+    return all(t in _LYRICS_INTERJECTIONS or len(set(t)) <= 1 for t in tokens)
+
+
+def _passes_lyrics_filters(seg):
+    """True si el segmento parece letra util; False si es basura/alucinacion.
+
+    Combina cinco criterios (basta que uno diga NO):
+    - Duracion minima.
+    - Densidad minima chars/segundo (evita "Eh..." de 26 s).
+    - `no_speech_prob` (Whisper cree que no hay voz).
+    - `avg_logprob` (baja confianza del modelo).
+    - Interjecciones puras.
+    - Blacklist de frases tipicas de alucinacion.
+    """
+    text = seg.get("text", "").strip()
+    if not text:
+        return False
+
+    duration = float(seg["end"]) - float(seg["start"])
+    if duration < LYRICS_MIN_DURATION_S:
+        return False
+
+    chars_per_sec = len(text) / max(duration, 0.001)
+    if chars_per_sec < LYRICS_MIN_CHARS_PER_SEC:
+        return False
+
+    if seg.get("no_speech_prob", 0.0) > LYRICS_MAX_NO_SPEECH_PROB:
+        return False
+    if seg.get("avg_logprob", 0.0) < LYRICS_MIN_LOGPROB:
+        return False
+
+    if _is_interjection_only(text):
+        return False
+
+    low = text.lower()
+    if any(pat.search(low) for pat in _LYRICS_HALLUCINATION_PATTERNS):
+        return False
+
+    return True
+
+
+def _clean_lyrics_segments(segs):
+    """Aplica filtros y colapsa repeticiones consecutivas.
+
+    Devuelve una lista nueva de segmentos limpios (sin campos internos
+    `avg_logprob`/`no_speech_prob`) e ids renumerados desde 0. Registra en
+    consola cuantos se han descartado por que motivo aproximado.
+    """
+    kept = []
+    dropped = 0
+    for s in segs:
+        if not _passes_lyrics_filters(s):
+            dropped += 1
+            continue
+        # Colapsa repeticiones consecutivas del mismo texto (frecuente en
+        # coros): extiende el end del anterior en vez de duplicar.
+        if kept and kept[-1]["text"].lower() == s["text"].lower():
+            kept[-1]["end"] = s["end"]
+            continue
+        kept.append(s)
+
+    out = []
+    for i, s in enumerate(kept):
+        out.append({
+            "id": i,
+            "start": s["start"],
+            "end": s["end"],
+            "text": s["text"],
+        })
+    return out, dropped
+
+
 def run_lyrics(vocals_path, output_dir, language=None,
                model_name="large-v3", device="cuda", compute_type="float16"):
     """Transcribe la voz aislada con faster-whisper -> lyrics.json.
@@ -292,24 +411,39 @@ def run_lyrics(vocals_path, output_dir, language=None,
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
 
     print(f"[whisper] transcribing {vocals_path} (language={language or 'auto'})")
+    # Params anti-alucinacion: sin arrastre de contexto (no propaga
+    # invenciones en cadena), umbral de no-speech mas estricto, y
+    # descarte activo de segmentos generados sobre silencios largos.
     segments_iter, info = model.transcribe(
         str(vocals_path),
         language=language,
         word_timestamps=False,
-        vad_filter=True,                  # ignora silencios largos, ahorra tiempo
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+        condition_on_previous_text=False,
+        no_speech_threshold=0.7,
+        hallucination_silence_threshold=2.0,
+        log_prob_threshold=-1.0,
     )
 
-    segments = []
+    raw = []
     for i, seg in enumerate(segments_iter):
         text = seg.text.strip()
         if not text:
             continue
-        segments.append({
+        raw.append({
             "id": i,
             "start": round(float(seg.start), 3),
             "end": round(float(seg.end), 3),
             "text": text,
+            # Confianzas: se usan solo para filtrar; no se exponen en el JSON.
+            "avg_logprob": float(getattr(seg, "avg_logprob", 0.0) or 0.0),
+            "no_speech_prob": float(getattr(seg, "no_speech_prob", 0.0) or 0.0),
         })
+
+    segments, dropped = _clean_lyrics_segments(raw)
+    if dropped:
+        print(f"[whisper] lyrics filter dropped {dropped}/{len(raw)} noisy segments")
 
     out = {
         "language": info.language,
