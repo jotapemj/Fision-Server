@@ -56,7 +56,7 @@ def _describe(lib, h, name):
 
 
 # ------------------------------------------------------------ persistencia ----
-_PERSIST_KEYS = ("job_id", "user", "hash", "nombre", "config", "reprocess")
+_PERSIST_KEYS = ("job_id", "user", "hash", "nombre", "config", "reprocess", "kind")
 
 
 def _persist():
@@ -87,28 +87,51 @@ def _load_queue():
 
 
 # ----------------------------------------------------------------- crear ----
-def create_job(user, audio_hash, name, cfg, reprocess=False):
-    """Encola un trabajo para 'user'. El user viaja con el job hasta el disco."""
+def create_job(user, audio_hash, name, cfg, reprocess=False, kind="separation"):
+    """Encola un trabajo para 'user'. El user viaja con el job hasta el disco.
+
+    kind:
+      - "separation" (por defecto): pipeline completo (stems + beats + chords).
+      - "lyrics": transcripcion Whisper sobre el vocals.flac vigente.
+    Un job de lyrics NO toca meta ni result.zip: escribe lyrics.json dentro
+    de stems/ y punto. La meta principal solo la mueven jobs de separacion.
+    """
     jid = uuid.uuid4().hex[:12]
     job = {"job_id": jid, "user": user, "hash": audio_hash, "nombre": name,
            "config": cfg, "estado": "queued", "error": "", "creado": _now(),
-           "reprocess": reprocess}
+           "reprocess": reprocess, "kind": kind}
     with _cond:
         _jobs[jid] = job
         _pending.append(jid)
         _persist()
         _cond.notify()
 
-    # Reflejar en meta que esta en cola/proceso, SIN tocar el resultado vigente.
-    lib = library.for_user(user)
-    now = _now()
-    meta = lib.read_meta(audio_hash) or {"hash": audio_hash}
-    meta.setdefault("created_at", now)
-    meta.update({"nombre": name, "config": cfg,
-                 "estado": "procesando", "updated_at": now})
-    meta.update(_describe(lib, audio_hash, name))
-    lib.write_meta(audio_hash, meta)
+    # La meta de la biblioteca solo la tocan los jobs de separacion. Un job
+    # de lyrics no altera el estado "listo" del resultado principal.
+    if kind == "separation":
+        lib = library.for_user(user)
+        now = _now()
+        meta = lib.read_meta(audio_hash) or {"hash": audio_hash}
+        meta.setdefault("created_at", now)
+        meta.update({"nombre": name, "config": cfg,
+                     "estado": "procesando", "updated_at": now})
+        meta.update(_describe(lib, audio_hash, name))
+        lib.write_meta(audio_hash, meta)
     return job
+
+
+def has_active_lyrics(user, audio_hash):
+    """True si ya hay un job de lyrics vivo (queued/running/waiting_gpu) para
+    (user, hash). Usado por el endpoint POST /library/{h}/lyrics para evitar
+    duplicados."""
+    with _cond:
+        for j in _jobs.values():
+            if (j.get("kind") == "lyrics"
+                    and j.get("user") == user
+                    and j.get("hash") == audio_hash
+                    and j["estado"] in ("queued", "running", "waiting_gpu")):
+                return True
+    return False
 
 
 # --------------------------------------------------------------- consulta ----
@@ -225,11 +248,16 @@ def recover():
             if meta and meta.get("estado") == "listo" and meta.get("config") == j["config"]:
                 known.add((j["user"], j["hash"]))
                 continue
-            lib.discard_tmp(j["hash"])        # tira el stems_tmp/ a medias
+            kind = j.get("kind") or "separation"
+            if kind == "separation":
+                lib.discard_tmp(j["hash"])    # tira el stems_tmp/ a medias
+            # kind=lyrics no toca stems_tmp/: escribe directo en stems/ y si
+            # cayo a medias, en el peor caso deja un lyrics.json parcial que
+            # el reintento sobreescribe atomicamente.
             job = {"job_id": j["job_id"], "user": j["user"], "hash": j["hash"],
                    "nombre": j.get("nombre") or j["hash"], "config": j["config"],
                    "estado": "queued", "error": "", "creado": _now(),
-                   "reprocess": j.get("reprocess", True)}
+                   "reprocess": j.get("reprocess", True), "kind": kind}
             _jobs[job["job_id"]] = job
             _pending.append(job["job_id"])
             known.add((j["user"], j["hash"]))
@@ -266,13 +294,18 @@ def _force_cpu(cfg):
     return cfg
 
 
-def _wait_for_gpu(jid):
-    """Espera a que haya VRAM libre >= GPU_MIN_VRAM_MB.
+def _wait_for_gpu(jid, min_vram_mb=None):
+    """Espera a que haya VRAM libre >= min_vram_mb (default: GPU_MIN_VRAM_MB).
 
     True si llega a tiempo, False si timeout o cancelacion. Marca el job como
     'waiting_gpu' mientras espera; lo devuelve a 'running' cuando pasa.
+
+    El umbral es parametrizable para que un job de lyrics use su propio
+    minimo (WHISPER_MIN_VRAM_MB, mas bajo que el de separacion).
     """
-    if gpu.vram_free_mb() >= config.GPU_MIN_VRAM_MB:
+    if min_vram_mb is None:
+        min_vram_mb = config.GPU_MIN_VRAM_MB
+    if gpu.vram_free_mb() >= min_vram_mb:
         return True                             # camino rapido: VRAM libre al primer intento
 
     deadline = time.time() + config.GPU_WAIT_TIMEOUT_SEC
@@ -294,7 +327,7 @@ def _wait_for_gpu(jid):
             log.event("job.gpu_timeout", job_id=jid)
             return False
         time.sleep(config.GPU_POLL_SEC)
-        if gpu.vram_free_mb() >= config.GPU_MIN_VRAM_MB:
+        if gpu.vram_free_mb() >= min_vram_mb:
             with _cond:
                 job = _jobs.get(jid)
                 if not job or job["estado"] == "cancelled":
@@ -320,6 +353,112 @@ def _next_job():
             _cond.wait()
 
 
+def _preserve_lyrics(lib, h, tmp_stems):
+    """Copia lyrics.json vigente a stems_tmp antes del swap. Idempotente.
+
+    Al reprocesar la separacion queremos que la letra generada previamente
+    sobreviva al `commit_result` atomico (que destruye stems/ y lo sustituye
+    por stems_tmp/). Copiamos aqui; si no habia lyrics.json vigente, no
+    pasa nada.
+    """
+    src = lib.stems_dir(h) / "lyrics.json"
+    if not src.exists():
+        return
+    dst = Path(tmp_stems) / "lyrics.json"
+    try:
+        shutil.copy2(src, dst)
+    except Exception as e:
+        log.event("lyrics.preserve_fail", hash=h, error=str(e))
+
+
+def _run_separation(job, lib):
+    """Camino clasico del pipeline (stems + beats + chords)."""
+    jid = job["job_id"]
+    h = job["hash"]
+    tmp_stems = lib.entry_dir(h) / "stems_tmp"
+
+    # Degrada silenciosamente si el cliente pidio cuda pero el server
+    # no tiene GPU (o la deteccion fallo). El pipeline sigue en CPU.
+    if _wants_gpu(job["config"]) and not gpu.has_gpu():
+        job["config"] = _force_cpu(job["config"])
+        log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
+
+    # Gate de VRAM: si el job pide cuda, espera a tener libre >= minimo.
+    if _wants_gpu(job["config"]):
+        if not _wait_for_gpu(jid, min_vram_mb=config.GPU_MIN_VRAM_MB):
+            if _jobs.get(jid, {}).get("estado") == "cancelled":
+                raise RuntimeError("cancelado")
+            raise RuntimeError("GPU ocupada")
+
+    if tmp_stems.exists():
+        shutil.rmtree(tmp_stems)
+
+    inp = lib.input_path(h)
+    if inp is None:
+        raise RuntimeError("no hay input para este hash")
+
+    pipeline.process(
+        inp, tmp_stems, job["config"],
+        on_proc=lambda p: _current.__setitem__("proc", p))
+
+    if job["estado"] == "cancelled":
+        raise RuntimeError("cancelado")
+
+    # Al reprocesar, preserva lyrics.json vigente antes del swap atomico.
+    if job.get("reprocess"):
+        _preserve_lyrics(lib, h, tmp_stems)
+
+    lib.commit_result(h, tmp_stems)
+    now = _now()
+    meta = lib.read_meta(h) or {"hash": h}
+    meta.setdefault("created_at", now)
+    meta.update({"estado": "listo", "config": job["config"],
+                 "nombre": job["nombre"], "updated_at": now})
+    meta.update(_describe(lib, h, job["nombre"]))
+    lib.write_meta(h, meta)
+
+
+def _run_lyrics(job, lib):
+    """Job de lyrics: Whisper sobre vocals.flac vigente.
+
+    Escribe directamente en stems/ (no usa stems_tmp/, no toca zip ni meta).
+    Requiere que vocals.flac exista: el endpoint que encola ya lo comprueba
+    antes, pero comprobamos otra vez por si el fichero se ha borrado entre
+    encolado y ejecucion.
+    """
+    jid = job["job_id"]
+    h = job["hash"]
+    vocals = lib.stems_dir(h) / "vocals.flac"
+    if not vocals.exists():
+        raise RuntimeError("vocals.flac no disponible; procesa la cancion primero")
+
+    # Elegir device: si el server no tiene GPU, degradamos a CPU/int8 igual
+    # que hace la separacion. Si la tiene, pasamos por el gate de VRAM.
+    if gpu.has_gpu():
+        if not _wait_for_gpu(jid, min_vram_mb=config.WHISPER_MIN_VRAM_MB):
+            if _jobs.get(jid, {}).get("estado") == "cancelled":
+                raise RuntimeError("cancelado")
+            raise RuntimeError("GPU ocupada")
+        device = config.WHISPER_DEVICE
+        compute = config.WHISPER_COMPUTE
+    else:
+        device = "cpu"
+        compute = "int8"
+        log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
+
+    if job["estado"] == "cancelled":
+        raise RuntimeError("cancelado")
+
+    lang = None
+    if isinstance(job.get("config"), dict):
+        lang = job["config"].get("language") or None
+
+    pipeline.process_lyrics(
+        vocals, lib.stems_dir(h), language=lang,
+        device=device, compute=compute,
+        on_proc=lambda p: _current.__setitem__("proc", p))
+
+
 def _worker():
     while True:
         jid = _next_job()
@@ -332,6 +471,7 @@ def _worker():
 
         user = job["user"]
         h = job["hash"]
+        kind = job.get("kind") or "separation"
         lib = library.for_user(user)
         with _cond:
             job["estado"] = "running"
@@ -339,52 +479,25 @@ def _worker():
             _current["proc"] = None
             _persist()                        # queda registrado como 'running'
 
-        tmp_stems = lib.entry_dir(h) / "stems_tmp"
-
         try:
-            # Degrada silenciosamente si el cliente pidio cuda pero el server
-            # no tiene GPU (o la deteccion fallo). El pipeline sigue en CPU.
-            if _wants_gpu(job["config"]) and not gpu.has_gpu():
-                job["config"] = _force_cpu(job["config"])
-                log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
-
-            # Gate de VRAM: si el job pide cuda, espera a tener libre >= minimo.
-            if _wants_gpu(job["config"]):
-                if not _wait_for_gpu(jid):
-                    if _jobs.get(jid, {}).get("estado") == "cancelled":
-                        raise RuntimeError("cancelado")
-                    raise RuntimeError("GPU ocupada")
-
-            if tmp_stems.exists():
-                shutil.rmtree(tmp_stems)
-
-            inp = lib.input_path(h)
-            if inp is None:
-                raise RuntimeError("no hay input para este hash")
-
-            pipeline.process(
-                inp, tmp_stems, job["config"],
-                on_proc=lambda p: _current.__setitem__("proc", p))
+            if kind == "lyrics":
+                _run_lyrics(job, lib)
+            else:
+                _run_separation(job, lib)
 
             if job["estado"] == "cancelled":
                 raise RuntimeError("cancelado")
-
-            lib.commit_result(h, tmp_stems)
             job["estado"] = "done"
-            now = _now()
-            meta = lib.read_meta(h) or {"hash": h}
-            meta.setdefault("created_at", now)
-            meta.update({"estado": "listo", "config": job["config"],
-                         "nombre": job["nombre"], "updated_at": now})
-            meta.update(_describe(lib, h, job["nombre"]))
-            lib.write_meta(h, meta)
 
         except Exception as e:
             was_cancelled = job["estado"] == "cancelled"
             job["estado"] = "cancelled" if was_cancelled else "error"
             job["error"] = str(e)
-            shutil.rmtree(tmp_stems, ignore_errors=True)
-            _revert_meta(user, h, was_cancelled)
+            if kind == "separation":
+                tmp_stems = lib.entry_dir(h) / "stems_tmp"
+                shutil.rmtree(tmp_stems, ignore_errors=True)
+                _revert_meta(user, h, was_cancelled)
+            # kind=lyrics no toca meta ni deja tmp; nada que revertir.
 
         finally:
             with _cond:

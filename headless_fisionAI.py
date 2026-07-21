@@ -259,6 +259,84 @@ def run_beats(input_file: str, output_dir: str):
     return tempo
 
 
+# ---------- LYRICS ----------
+def run_lyrics(vocals_path, output_dir, language=None,
+               model_name="large-v3", device="cuda", compute_type="float16"):
+    """Transcribe la voz aislada con faster-whisper -> lyrics.json.
+
+    - vocals_path: ruta a vocals.flac (o cualquier audio con solo voz).
+    - output_dir : donde escribir lyrics.json.
+    - language   : codigo ISO ("en", "es", "fr", ...). None -> auto-detect.
+    - model_name : checkpoint de Whisper. "large-v3" es el estandar.
+    - device     : "cuda" o "cpu".
+    - compute_type: precision de inferencia. "float16" para GPU, "int8" para CPU.
+
+    Formato de salida (`lyrics.json`):
+        {"language": "en", "language_probability": 0.98, "duration": 234.5,
+         "model": "large-v3",
+         "segments": [{"id": 0, "start": 12.34, "end": 15.67, "text": "..."}, ...]}
+
+    Timestamps a nivel de segmento (frase natural). Word-level no se incluye
+    para no engordar el JSON; se puede activar en el futuro sin romper el
+    formato actual (campo "words" opcional dentro de cada segmento).
+
+    Cada llamada CARGA Y LIBERA el modelo. Justificado: lyrics es opt-in y de
+    baja frecuencia; asi liberamos VRAM entre jobs para no bloquear la
+    separacion. Coste amortizable ~5 s de carga.
+    """
+    import json
+    import gc
+    from faster_whisper import WhisperModel
+
+    print(f"[whisper] loading model={model_name} device={device} compute={compute_type}")
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+
+    print(f"[whisper] transcribing {vocals_path} (language={language or 'auto'})")
+    segments_iter, info = model.transcribe(
+        str(vocals_path),
+        language=language,
+        word_timestamps=False,
+        vad_filter=True,                  # ignora silencios largos, ahorra tiempo
+    )
+
+    segments = []
+    for i, seg in enumerate(segments_iter):
+        text = seg.text.strip()
+        if not text:
+            continue
+        segments.append({
+            "id": i,
+            "start": round(float(seg.start), 3),
+            "end": round(float(seg.end), 3),
+            "text": text,
+        })
+
+    out = {
+        "language": info.language,
+        "language_probability": round(float(info.language_probability), 4),
+        "duration": round(float(info.duration), 3),
+        "model": model_name,
+        "segments": segments,
+    }
+
+    out_path = Path(output_dir) / "lyrics.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    print(f"[whisper] lyrics written to {out_path} ({len(segments)} segments)")
+
+    # Libera VRAM al terminar.
+    del model
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    return out
+
+
 # ---------- CHORDS SECTION -----------------
 
 _QUALITY_MAP = {

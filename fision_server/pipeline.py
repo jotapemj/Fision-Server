@@ -25,3 +25,23 @@ def process(input_path, out_stems_dir, cfg, on_proc=None):
     ret = proc.wait()
     if ret != 0:
         raise RuntimeError(f"orquestador fallo (codigo {ret})")
+
+
+def process_lyrics(vocals_path, out_stems_dir, language=None, device=None,
+                   compute=None, on_proc=None):
+    """Invoca el CLI de lyrics sobre vocals.flac. Bloqueante.
+
+    device/compute: opcionales. Si None, los defaults de config (env). El
+    worker los sobreescribe cuando degrada a CPU por falta de GPU.
+    """
+    out_stems_dir = Path(out_stems_dir)
+    out_stems_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = config.lyrics_cli_command(vocals_path, out_stems_dir, language,
+                                    device=device, compute=compute)
+    proc = subprocess.Popen(cmd)
+    if on_proc:
+        on_proc(proc)
+    ret = proc.wait()
+    if ret != 0:
+        raise RuntimeError(f"lyrics CLI fallo (codigo {ret})")

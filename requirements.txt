@@ -34,6 +34,11 @@ onnxruntime-gpu
 beat-this @ git+https://github.com/CPJKU/beat_this.git
 madmom @ git+https://github.com/CPJKU/madmom.git
 
+# ---- Lyrics (Whisper via faster-whisper) ----
+# Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper. Cache del
+# modelo en ~/.cache/huggingface/hub/ (se baja en primer arranque).
+faster-whisper
+
 # ---- Audio / IO ----
 soundfile
 pydub

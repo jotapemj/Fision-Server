@@ -295,3 +295,54 @@ def lib_delete(h: str, user: str = Depends(current_user)):
         raise HTTPException(404, "No existe")
     lib.delete_entry(h)
     return {"hash": h, "borrado": True}
+
+
+# ---------------------------------------------------------------- lyrics ----
+class LyricsIn(BaseModel):
+    language: str | None = None                    # ISO code o None (auto)
+
+
+@app.post("/library/{h}/lyrics")
+def lyrics_start(h: str, body: LyricsIn, user: str = Depends(current_user)):
+    """Encola un job de transcripcion Whisper sobre vocals.flac vigente.
+
+    409 si vocals no existe todavia (job principal en marcha), o si ya hay
+    otro job de lyrics activo para el mismo hash.
+    """
+    _require_hash(h)
+    lib = library.for_user(user)
+    if not lib.exists(h):
+        raise HTTPException(404, "No existe")
+    vocals = lib.stems_dir(h) / "vocals.flac"
+    if not vocals.exists():
+        raise HTTPException(409, "vocals.flac no disponible todavia; espera a "
+                                 "que termine el job principal")
+    if jobs.has_active_lyrics(user, h):
+        raise HTTPException(409, "Ya hay un job de lyrics en curso para esta cancion")
+
+    lang = (body.language or "").strip() or None
+    m = lib.read_meta(h) or {}
+    job = jobs.create_job(user, h, m.get("nombre", h),
+                          {"language": lang}, reprocess=False, kind="lyrics")
+    return {"job_id": job["job_id"], "hash": h, "estado": job["estado"]}
+
+
+@app.get("/library/{h}/lyrics")
+def lyrics_get(h: str, user: str = Depends(current_user)):
+    _require_hash(h)
+    p = library.for_user(user).stems_dir(h) / "lyrics.json"
+    if not p.exists():
+        raise HTTPException(404, "Sin lyrics")
+    return FileResponse(p, media_type="application/json")
+
+
+@app.delete("/library/{h}/lyrics")
+def lyrics_delete(h: str, user: str = Depends(current_user)):
+    _require_hash(h)
+    p = library.for_user(user).stems_dir(h) / "lyrics.json"
+    if p.exists():
+        try:
+            p.unlink()
+        except OSError as e:
+            raise HTTPException(500, str(e))
+    return {"hash": h, "ok": True}

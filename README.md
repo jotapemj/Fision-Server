@@ -47,6 +47,13 @@ Three pieces:
   4/4; tempo range is 55-215 BPM.
 - **Chords** — BTC, a Transformer chord-recognition model, large vocabulary
   (170 chords), included as a git submodule.
+- **Lyrics (opt-in)** — Whisper (via `faster-whisper`, CTranslate2 engine) on
+  the isolated `vocals.flac` stem. Not part of the main pipeline; runs only
+  when the client explicitly requests transcription. Segment-level timestamps
+  (one entry per phrase) suitable for karaoke rendering. Model loads and
+  releases per request so it does not permanently occupy VRAM. Whisper
+  supports 99 languages; the client passes an ISO code (`en`, `es`, `fr`, ...)
+  or lets it auto-detect.
 
 ## Install
 
@@ -110,11 +117,29 @@ python headless_fisionAI_gui.py
 python headless_fision_CLI.py <input_audio> <output_dir> [config.json]
 ```
 
+### 4. Lyrics (Whisper, standalone)
+
+Lyrics generation is opt-in and lives outside the main pipeline. Once a song
+has been processed and `vocals.flac` exists, the same transcription used by
+the server can be invoked manually:
+
+```bash
+python headless_fision_lyrics_CLI.py <vocals.flac> <output_dir> [language]
+```
+
+`language` is an ISO code (`en`, `es`, `fr`, ...). Omit it or pass `auto` to
+let Whisper detect the language. The command writes `lyrics.json` (with
+per-segment timestamps) into `<output_dir>`.
+
 ## Credits & licenses
 
 - **Separation models** served via `audio-separator` (UVR / MDX / Demucs family).
 - **beat_this** — Foscarin, Schlüter, Widmer (CPJKU, ISMIR 2024).
+- **madmom** — CPJKU/OFAI (BSD 3-clause); used for its Dynamic Bayesian
+  Network beat/downbeat tracker, invoked by beat_this's DBN postprocessor.
 - **BTC** — Jonggwon Park et al., *A Bi-Directional Transformer for Musical
   Chord Recognition* (ISMIR 2019), MIT license; used via a compatibility fork.
+- **Whisper** — OpenAI (MIT); used via `faster-whisper` (CTranslate2 engine,
+  same weights, MIT).
 
 Each model keeps its own license; check upstream before redistribution.

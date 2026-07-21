@@ -98,7 +98,12 @@ All configuration is read from environment variables.
 | `FISION_GPU_MIN_VRAM_MB` | `4096`                   | Minimum free VRAM required to start a CUDA job.    |
 | `FISION_GPU_POLL_SEC`    | `30`                     | Poll interval while a job waits for free VRAM.     |
 | `FISION_GPU_WAIT_TIMEOUT_SEC` | `600`               | Hard timeout waiting for VRAM; aborts the job.     |
+| `FISION_WHISPER_MODEL`   | `large-v3`               | faster-whisper checkpoint used for lyrics.         |
+| `FISION_WHISPER_DEVICE`  | `cuda`                   | Device for Whisper inference (`cuda` or `cpu`).    |
+| `FISION_WHISPER_COMPUTE` | `float16`                | Whisper compute type (`float16`/`int8`/...).       |
+| `FISION_WHISPER_MIN_VRAM_MB` | `3072`               | Minimum free VRAM required to start a lyrics job.  |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
+| `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
 
 
 ## Authentication and user management
@@ -146,6 +151,9 @@ All routes except `/health` and `/login` require `Authorization: Bearer <token>`
 | GET    | `/library/{hash}/zip`         | Download the current `result.zip`.               |
 | GET    | `/library/{hash}/stems/{file}`| Serve a stems file (cover art or audio).         |
 | DELETE | `/library/{hash}`             | Delete the entry.                                |
+| POST   | `/library/{hash}/lyrics`      | Enqueue a Whisper transcription over `vocals.flac`.|
+| GET    | `/library/{hash}/lyrics`      | Serve `lyrics.json` (404 if not generated yet).   |
+| DELETE | `/library/{hash}/lyrics`      | Remove the current `lyrics.json`.                 |
 
 ### Pipeline contract
 
@@ -190,7 +198,9 @@ processing still completes.
 
 Job states exposed to clients: `queued`, `running`, `waiting_gpu`, `done`,
 `error`, `cancelled`. A `waiting_gpu` job counts as position `0` in the queue
-and can be cancelled the same way as a running one.
+and can be cancelled the same way as a running one. Jobs share a `kind` field
+internally (`separation` or `lyrics`); it is not exposed in the API but
+drives the worker's dispatch and VRAM threshold.
 
 ## Avatars
 
@@ -205,6 +215,78 @@ GET    /auth/avatar          -> image/*, 404 if none
 PUT    /auth/avatar          -> multipart 'file'; 413 if >FISION_MAX_AVATAR_MB, 400 if not JPEG/PNG/WebP
 DELETE /auth/avatar          -> removes the avatar
 ```
+
+## Lyrics
+
+Lyrics transcription is **opt-in and off the main pipeline**. When a song is
+uploaded, the server runs stem separation, beats and chords — but not lyrics.
+The client requests transcription only when the user asks for it (typically
+from the lyrics tab of the player).
+
+The endpoint runs Whisper (via `faster-whisper`) over the isolated
+`vocals.flac` stem. It requires the main job to have completed first; if
+`vocals.flac` is not yet on disk, the endpoint returns **409 Conflict** and
+the client must retry once the song is ready.
+
+```
+POST /library/{hash}/lyrics
+Body: {"language": "en"}   -> ISO code, or null for auto-detect
+Return: {"job_id": "...", "hash": "...", "estado": "queued"}
+```
+
+Whisper supports 99 languages; some common ISO codes: `en`, `es`, `fr`, `de`,
+`it`, `pt`, `nl`, `ru`, `ja`, `ko`, `zh`, `ar`, `tr`, `pl`, `sv`, `hi`. Set
+`language` to `null` (or omit it) to let Whisper detect it.
+
+Once the job finishes, `lyrics.json` is written into the song's `stems/`
+folder next to the other outputs and is also included in the next
+`result.zip`. The client can fetch it directly:
+
+```
+GET /library/{hash}/lyrics    -> application/json
+DELETE /library/{hash}/lyrics -> removes it (useful for a clean retry)
+```
+
+`lyrics.json` schema:
+
+```json
+{
+  "language": "en",
+  "language_probability": 0.98,
+  "duration": 234.5,
+  "model": "large-v3",
+  "segments": [
+    {"id": 0, "start": 12.34, "end": 15.67, "text": "I feel the rain on my skin"},
+    {"id": 1, "start": 15.89, "end": 18.42, "text": "No one else can feel it for me"}
+  ]
+}
+```
+
+Timestamps are at the **segment (phrase) level**, meant to drive line-by-line
+karaoke rendering. Word-level timestamps are not emitted by default; adding
+them later would populate an optional `words` field inside each segment
+without breaking the current schema.
+
+**Reprocessing a song does not lose the lyrics.** When
+`POST /library/{hash}/reprocess` runs, the worker copies any existing
+`lyrics.json` into the atomic `stems_tmp/` folder before the commit swap, so
+the lyrics survive re-separation.
+
+**GPU gating.** Lyrics jobs share the single global queue but use a separate
+VRAM threshold (`FISION_WHISPER_MIN_VRAM_MB`, default 3072 MB) since Whisper
+large-v3 in FP16 needs about 3 GB — less than a full separation. The model
+is loaded and released per job so it does not permanently occupy VRAM.
+
+**Client contract (Android).**
+
+1. Open the lyrics tab. `GET /library/{hash}/lyrics`:
+   - 200 → parse the JSON and render the karaoke view.
+   - 404 → show "not generated yet, press Generate".
+2. On Generate, let the user pick a language (or "auto"), then
+   `POST /library/{hash}/lyrics {"language": "en"}`.
+3. Poll `GET /jobs/{job_id}` as with any other job. On `done`, `GET
+   /library/{hash}/lyrics` and cache the response (`?v=<updated_at>` to
+   invalidate after a `DELETE` + regenerate).
 
 ## Logging
 
