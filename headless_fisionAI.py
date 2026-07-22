@@ -260,6 +260,34 @@ def run_beats(input_file: str, output_dir: str):
 
 
 # ---------- LYRICS ----------
+# Pistas de contexto para Whisper. Se pasan como `initial_prompt` cuando el
+# usuario fija idioma. Objetivo: anclar el decoder al registro "letra de
+# cancion" y reducir boilerplate de YouTube ("Suscribete", "Amara.org",
+# "Subtitulos por..."). No van con language=None (auto) para no sesgar la
+# deteccion.
+_LYRICS_INITIAL_PROMPTS = {
+    "es": "Letra de cancion en espanol.",
+    "en": "Song lyrics in English.",
+    "fr": "Paroles de chanson en francais.",
+    "pt": "Letra de musica em portugues.",
+    "it": "Testo di canzone in italiano.",
+    "de": "Liedtext auf Deutsch.",
+    "ca": "Lletra de canco en catala.",
+    "gl": "Letra de cancion en galego.",
+    "eu": "Kantuko hitzak euskaraz.",
+    "nl": "Nederlands liedtekst.",
+    "pl": "Tekst piosenki po polsku.",
+    "sv": "Svenska sangtexter.",
+    "tr": "Turkce sarki sozleri.",
+    "ru": "Tekst pesni na russkom.",
+    "ja": "Nihongo no kashi.",
+    "ko": "Hangugeo norae gasa.",
+    "zh": "Zhongwen gequ geci.",
+    "ar": "Kalimat ughniya bilarabiya.",
+    "hi": "Hindi gaane ke bol.",
+}
+
+
 def _prepare_vocals_for_whisper(vocals_path):
     """Devuelve (audio_path, tmp_path_or_None).
 
@@ -333,16 +361,25 @@ def run_lyrics(vocals_path, output_dir, language=None,
     # transcribe mejor con las armonias presentes.
     audio_for_whisper, tmp_mix = _prepare_vocals_for_whisper(vocals_path)
 
-    print(f"[whisper] transcribing {audio_for_whisper} (language={language or 'auto'})")
-    # Config inicial: defaults de Whisper + VAD activado. Sin params
-    # anti-alucinacion. Sin filtros de post-proc. Preferimos ver todo lo
-    # que el modelo escupe (incluidas eventuales alucinaciones) antes que
-    # perder letra real por umbrales agresivos.
+    # Prompt de contexto solo cuando el usuario fija idioma. En auto no
+    # inyectamos nada para no sesgar la deteccion automatica.
+    prompt = _LYRICS_INITIAL_PROMPTS.get((language or "").lower()) if language else None
+
+    print(f"[whisper] transcribing {audio_for_whisper} "
+          f"(language={language or 'auto'}, prompt={'yes' if prompt else 'no'})")
+    # Defaults de Whisper + dos ajustes minimos:
+    # - condition_on_previous_text=False: rompe los bucles de repeticion
+    #   infinita al no arrastrar la salida previa como contexto del
+    #   siguiente segmento (causa clasica de alucinacion en cadena).
+    # - initial_prompt: pequeno ancla al registro "letra de cancion" para
+    #   reducir boilerplate tipo "Subtitulos por..." o "Suscribete al canal".
     segments_iter, info = model.transcribe(
         str(audio_for_whisper),
         language=language,
         word_timestamps=False,
         vad_filter=True,                      # ignora silencios largos, ahorra tiempo
+        condition_on_previous_text=False,
+        initial_prompt=prompt,
     )
 
     segments = []
