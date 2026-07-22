@@ -17,9 +17,12 @@ import re
 # obtener los segmentos del modelo. Ajustar aqui hasta encontrar el
 # equilibrio para tu tipo de musica.
 LYRICS_MIN_DURATION_S = 0.3            # segmentos mas cortos = ruido
-LYRICS_MIN_CHARS_PER_SEC = 1.0         # densidad minima texto/tiempo
+LYRICS_MIN_CHARS_PER_SEC = 0.5         # densidad minima texto/tiempo (baja para
+                                       # no matar outros lentos; "Eh..." 26 s
+                                       # con ~4 chars sigue cayendo)
 LYRICS_MAX_NO_SPEECH_PROB = 0.6        # por encima -> probablemente silencio
-LYRICS_MIN_LOGPROB = -1.0              # por debajo -> baja confianza
+LYRICS_MIN_LOGPROB = -1.5              # por debajo -> baja confianza (tolerante
+                                       # con voz cantada / segundos idiomas)
 
 # Palabras/onomatopeyas que si aparecen solas (o repetidas) indican que el
 # segmento es tarareo o interjeccion, no letra util.
@@ -379,6 +382,43 @@ def _clean_lyrics_segments(segs):
     return out, dropped
 
 
+def _prepare_vocals_for_whisper(vocals_path):
+    """Devuelve (audio_path, tmp_path_or_None).
+
+    Si en el mismo directorio de `vocals_path` existe `vocals2.flac` (coros
+    del modo split), suma ambos en el dominio temporal a un WAV temporal y
+    devuelve esa ruta. Whisper transcribe mejor con lead + armonias presentes.
+
+    Si no hay vocals2, devuelve el vocals original tal cual.
+    Nunca revienta: cualquier fallo en el mix cae de vuelta al vocals unico.
+    """
+    vocals_path = Path(vocals_path)
+    sibling = vocals_path.parent / "vocals2.flac"
+    if vocals_path.name != "vocals.flac" or not sibling.exists():
+        return vocals_path, None
+    try:
+        import soundfile as sf
+        lead, sr = sf.read(str(vocals_path), always_2d=True)
+        cho, sr2 = sf.read(str(sibling), always_2d=True)
+        if sr != sr2:
+            print(f"[whisper] vocals mix skipped: sr mismatch {sr} vs {sr2}")
+            return vocals_path, None
+        n = min(len(lead), len(cho))
+        ch = min(lead.shape[1], cho.shape[1])
+        mix = lead[:n, :ch].astype(np.float32) + cho[:n, :ch].astype(np.float32)
+        # Normaliza si se sale de rango; conserva mezcla si cabe.
+        peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        if peak > 1.0:
+            mix /= peak
+        tmp = vocals_path.parent / "vocals_mix.tmp.wav"
+        sf.write(str(tmp), mix, sr, subtype="PCM_16")
+        print(f"[whisper] mixed vocals+vocals2 -> {tmp.name}")
+        return tmp, tmp
+    except Exception as e:
+        print(f"[whisper] vocals mix failed ({e}); using vocals.flac solo")
+        return vocals_path, None
+
+
 def run_lyrics(vocals_path, output_dir, language=None,
                model_name="large-v3", device="cuda", compute_type="float16"):
     """Transcribe la voz aislada con faster-whisper -> lyrics.json.
@@ -410,20 +450,29 @@ def run_lyrics(vocals_path, output_dir, language=None,
     print(f"[whisper] loading model={model_name} device={device} compute={compute_type}")
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
 
-    print(f"[whisper] transcribing {vocals_path} (language={language or 'auto'})")
-    # Params anti-alucinacion: sin arrastre de contexto (no propaga
-    # invenciones en cadena), umbral de no-speech mas estricto, y
-    # descarte activo de segmentos generados sobre silencios largos.
+    # Mezcla lead + coros si el pipeline los separo (modo vocals=split).
+    # Suma en dominio temporal a un WAV temporal; se borra al final. Whisper
+    # transcribe mejor con las armonias presentes.
+    audio_for_whisper, tmp_mix = _prepare_vocals_for_whisper(vocals_path)
+
+    print(f"[whisper] transcribing {audio_for_whisper} (language={language or 'auto'})")
+    # Params anti-alucinacion, pero sin apretar tanto que se coma outros
+    # tranquilos o repeticiones legitimas de estribillo (Amaral, Shakira).
+    # - condition_on_previous_text=False: no propaga alucinaciones en cadena.
+    # - no_speech_threshold: default de Whisper (0.6).
+    # - log_prob_threshold: tolerante (-1.5); el filtro post-proc afina.
+    # - vad_parameters: silencios de 700 ms para dejar respirar frases.
+    # - hallucination_silence_threshold: default (None); si se activa, salta
+    #   contenido real cuando hay pausas de 2 s entre repeticiones.
     segments_iter, info = model.transcribe(
-        str(vocals_path),
+        str(audio_for_whisper),
         language=language,
         word_timestamps=False,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
+        vad_parameters={"min_silence_duration_ms": 700},
         condition_on_previous_text=False,
-        no_speech_threshold=0.7,
-        hallucination_silence_threshold=2.0,
-        log_prob_threshold=-1.0,
+        no_speech_threshold=0.6,
+        log_prob_threshold=-1.5,
     )
 
     raw = []
@@ -467,6 +516,13 @@ def run_lyrics(vocals_path, output_dir, language=None,
             torch.cuda.empty_cache()
     except Exception:
         pass
+
+    # Borra el WAV temporal del mix vocals+vocals2 si se creo.
+    if tmp_mix is not None:
+        try:
+            tmp_mix.unlink()
+        except OSError:
+            pass
 
     return out
 
