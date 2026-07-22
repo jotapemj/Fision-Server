@@ -23,6 +23,10 @@ LYRICS_MIN_CHARS_PER_SEC = 0.5         # densidad minima texto/tiempo (baja para
 LYRICS_MAX_NO_SPEECH_PROB = 0.6        # por encima -> probablemente silencio
 LYRICS_MIN_LOGPROB = -1.5              # por debajo -> baja confianza (tolerante
                                        # con voz cantada / segundos idiomas)
+LYRICS_LONG_SEG_S = 12.0               # a partir de aqui un segmento es "largo"
+LYRICS_LONG_MIN_CHARS_PER_SEC = 2.5    # densidad exigida a segmentos largos
+                                       # (mata mega-chunks alucinados: 1 frase
+                                       # cubriendo 60 s de intro/outro instrumental)
 
 # Palabras/onomatopeyas que si aparecen solas (o repetidas) indican que el
 # segmento es tarareo o interjeccion, no letra util.
@@ -335,6 +339,11 @@ def _passes_lyrics_filters(seg):
     chars_per_sec = len(text) / max(duration, 0.001)
     if chars_per_sec < LYRICS_MIN_CHARS_PER_SEC:
         return False
+    # Segmentos "largos" (>12 s) suelen ser fusion de VAD sobre intro/outro
+    # instrumental: 1 frase corta con timestamps que se comen medio verso.
+    # Se exige densidad de habla cantada real.
+    if duration > LYRICS_LONG_SEG_S and chars_per_sec < LYRICS_LONG_MIN_CHARS_PER_SEC:
+        return False
 
     if seg.get("no_speech_prob", 0.0) > LYRICS_MAX_NO_SPEECH_PROB:
         return False
@@ -469,7 +478,15 @@ def run_lyrics(vocals_path, output_dir, language=None,
         language=language,
         word_timestamps=False,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 700},
+        # min_silence 250 ms: en canto las respiraciones son 200-500 ms;
+        #   un umbral alto (700 ms) fusiona intro/verso/pre-coro en un
+        #   mega-chunk que Whisper resuelve como frase alucinada de 60 s.
+        # max_speech 15 s: tope duro por chunk VAD; si un tramo continuo
+        #   pasa de 15 s, se corta a la fuerza.
+        vad_parameters={
+            "min_silence_duration_ms": 250,
+            "max_speech_duration_s": 15,
+        },
         condition_on_previous_text=False,
         no_speech_threshold=0.6,
         log_prob_threshold=-1.5,
