@@ -180,12 +180,15 @@ GET /server/info
   "gpu": true,
   "gpu_name": "NVIDIA GeForce RTX 3060",
   "vram_total_mb": 12288,
-  "driver": "550.54.15"
+  "driver": "550.54.15",
+  "version": "1.1.0"
 }
 ```
 
-When `gpu` is `false`, the other fields are empty. `nvidia-smi` is queried
+When `gpu` is `false`, the other GPU fields are empty. `nvidia-smi` is queried
 without loading PyTorch, so the endpoint is cheap and does not warm up CUDA.
+The `version` field carries the server's own release (see
+[Versioning](#versioning)).
 
 Jobs may include `"device": "cuda"` in the config. Before executing such a job
 the worker checks live free VRAM against `FISION_GPU_MIN_VRAM_MB` (default
@@ -314,6 +317,28 @@ To follow account events on a running service:
 ```bash
 journalctl -u fision -f | grep AUDIT
 ```
+
+## Versioning
+
+The server follows [SemVer](https://semver.org/) (`MAJOR.MINOR.PATCH`):
+
+- **MAJOR** - the client contract changes in an incompatible way (endpoint
+  removed, field renamed or reshaped, request/response format broken).
+- **MINOR** - new backwards-compatible feature (new endpoint, new optional
+  field or env, expanded behavior that keeps old clients working).
+- **PATCH** - bug fix, dependency bump, refactor or performance change with
+  no visible effect on the contract.
+
+Version bumps map from the commit prefix (Conventional Commits): `feat:` ->
+MINOR, `feat!:` or `BREAKING CHANGE:` in the body -> MAJOR, `fix:` /
+`deps:` / `perf:` / `revert:` -> PATCH. The current version lives in
+`fision_server/__init__.py` (`__version__`) and is served through
+`GET /server/info["version"]`. Release notes live in the repository's
+GitHub Releases page.
+
+Clients should cache the version on login and use it to detect
+incompatibilities: mismatching MAJOR means the client must upgrade before
+new jobs will be accepted.
 
 ## Deployment
 

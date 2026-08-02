@@ -29,7 +29,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-from . import config, library, jobs, users, security, log, avatars, gpu
+from . import (config, library, jobs, users, security, log, avatars, gpu,
+               __version__)
 from .auth import current_user, bearer_token
 
 
@@ -72,8 +73,8 @@ def health():
 # --------------------------------------------------------------- server info ----
 @app.get("/server/info")
 def server_info(user: str = Depends(current_user)):
-    """Info cacheada al arrancar. El cliente decide device (cuda/cpu) con esto."""
-    return gpu.info()
+    """Info cacheada al arrancar + version del server (SemVer)."""
+    return {**gpu.info(), "version": __version__}
 
 
 # ------------------------------------------------------------------- auth ----
