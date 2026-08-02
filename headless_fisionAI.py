@@ -6,61 +6,87 @@ import time
 import copy
 from pathlib import Path
 from pydub import AudioSegment, utils as pydub_utils
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, APIC
+import mutagen
+from mutagen.id3 import APIC
 import numpy as np
 import subprocess
 import re
 
 _clic_seg = AudioSegment.from_file('resources/metronome.wav')
 
-def run_metadata_extractor(input_file: str, output_dir: str):
+def _extract_cover_bytes(input_file: str):
+    """Devuelve bytes de la portada si la hay, None si no. Soporta ID3 (mp3),
+    Vorbis/FLAC y MP4/M4A. No revienta: cualquier fallo -> None."""
     try:
+        audio = mutagen.File(input_file)
+    except Exception:
+        return None
+    if audio is None:
+        return None
+    # MP3 / ID3: APIC dentro de audio.tags
+    tags = getattr(audio, "tags", None)
+    if tags is not None:
+        try:
+            for tag in tags.values():
+                if isinstance(tag, APIC):
+                    return tag.data
+        except Exception:
+            pass
+        # MP4 / M4A: 'covr' es lista de MP4Cover
+        try:
+            covr = tags.get("covr")
+            if covr:
+                return bytes(covr[0])
+        except Exception:
+            pass
+    # FLAC: lista de Picture en .pictures
+    pictures = getattr(audio, "pictures", None)
+    if pictures:
+        try:
+            return pictures[0].data
+        except Exception:
+            pass
+    return None
 
-        audio = MP3(input_file, ID3=ID3)
-        
 
-        tag_titulo = audio.tags.get('TIT2') if audio.tags else None
-        tag_artista = audio.tags.get('TPE1') if audio.tags else None
-        
-        # Aplicar la lógica condicional
-        if tag_titulo:
-            titulo = str(tag_titulo)
-            artista = str(tag_artista) if tag_artista else ""
-        else:
-            # Si el título es desconocido, usamos el nombre del archivo mp3 y artista en blanco
-            nombre_archivo_con_extension = os.path.basename(input_file)
-            titulo, _ = os.path.splitext(nombre_archivo_con_extension) # Quita el ".mp3"
-            artista = ""
-        
-        # 2. Construir el nombre base del archivo según si hay artista o no
-        nombre_base = "metadata"
-        
-        # 2. Guardar la información de metadatos en el directorio de salida (output_dir)
-        ruta_txt = os.path.join(output_dir, f"{nombre_base}.txt")
+def run_metadata_extractor(input_file: str, output_dir: str):
+    # Titulo/artista con fallback al nombre del fichero. Nunca aborta el pipeline.
+    titulo = ""
+    artista = ""
+    try:
+        audio_easy = mutagen.File(input_file, easy=True)
+        if audio_easy is not None and audio_easy.tags is not None:
+            titulo = (audio_easy.tags.get("title") or [""])[0]
+            artista = (audio_easy.tags.get("artist") or [""])[0]
+    except Exception as e:
+        print(f"Warning: cannot read tags ({e}); using filename as title")
+
+    if not titulo:
+        nombre_archivo_con_extension = os.path.basename(input_file)
+        titulo, _ = os.path.splitext(nombre_archivo_con_extension)
+
+    # metadata.txt SIEMPRE, incluso si no habia tags legibles
+    ruta_txt = os.path.join(output_dir, "metadata.txt")
+    try:
         with open(ruta_txt, "w", encoding="utf-8") as f:
             f.write(f"Artist: {artista}\n")
             f.write(f"Title: {titulo}\n")
         print(f"Metadata file save in {output_dir}")
-        
-        # 3. Extraer y guardar la portada (Artcover) en el directorio de salida (output_dir)
-        portada_encontrada = False
-        if audio.tags:
-            for tag in audio.tags.values():
-                if isinstance(tag, APIC):  # APIC representa la imagen adjunta en ID3
-                    ruta_png = os.path.join(output_dir, f"artcover.png")
-                    with open(ruta_png, "wb") as img_file:
-                        img_file.write(tag.data)
-                    print(f"Artcover extracted in: {output_dir}")
-                    portada_encontrada = True
-                    break  # Detener tras procesar la primera imagen encontrada
-                
-        if not portada_encontrada:
-            print("Artcover not found")
-            
     except Exception as e:
-        # Encapsulamos el error para que si un MP3 está corrupto, el pipeline principal no muera
-        print(f"Error processing metadata: {e}")
+        print(f"Error writing metadata.txt: {e}")
+
+    # Portada opcional: si no hay, avisa y sigue
+    cover = _extract_cover_bytes(input_file)
+    if cover:
+        ruta_png = os.path.join(output_dir, "artcover.png")
+        try:
+            with open(ruta_png, "wb") as img_file:
+                img_file.write(cover)
+            print(f"Artcover extracted in: {output_dir}")
+        except Exception as e:
+            print(f"Error writing artcover: {e}")
+    else:
+        print("Artcover not found")
 
 # ---------- SPINNER ----------
 class Spinner:
