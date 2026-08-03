@@ -313,6 +313,57 @@ _LYRICS_INITIAL_PROMPTS = {
     "hi": "Hindi gaane ke bol.",
 }
 
+# Umbral (en segundos) de silencio entre palabras para partir un segmento de
+# Whisper en sub-frases. Con word_timestamps=True el decoder tiende a agrupar
+# multiples frases en un unico segment de decenas de segundos; el split por
+# gap las devuelve a un tamano usable para karaoke por linea.
+_LYRICS_WORD_GAP_S = 2.0
+
+
+def _word_to_dict(w):
+    """Serializa un faster_whisper.Word a dict del JSON de salida."""
+    return {
+        "start": round(float(w.start), 3),
+        "end": round(float(w.end), 3),
+        "text": w.word.strip(),
+    }
+
+
+def _sub_seg_from_words(words):
+    """Construye un sub-segmento (start/end/text/words) a partir de una lista
+    contigua de faster_whisper.Word."""
+    text = "".join(w.word for w in words).strip()
+    return {
+        "start": round(float(words[0].start), 3),
+        "end": round(float(words[-1].end), 3),
+        "text": text,
+        "words": [_word_to_dict(w) for w in words],
+    }
+
+
+def _split_by_word_gaps(seg, gap_s=_LYRICS_WORD_GAP_S):
+    """Parte un segment de Whisper en sub-segments cuando el silencio entre
+    palabras consecutivas supera `gap_s`. Si no hay words (segment vacio o
+    modelo raro), devuelve un unico dict sin `words`."""
+    words = list(getattr(seg, "words", None) or [])
+    if not words:
+        return [{
+            "start": round(float(seg.start), 3),
+            "end": round(float(seg.end), 3),
+            "text": seg.text.strip(),
+            "words": [],
+        }]
+    bucket = [words[0]]
+    out = []
+    for w in words[1:]:
+        if float(w.start) - float(bucket[-1].end) >= gap_s:
+            out.append(_sub_seg_from_words(bucket))
+            bucket = [w]
+        else:
+            bucket.append(w)
+    out.append(_sub_seg_from_words(bucket))
+    return out
+
 
 def _prepare_vocals_for_whisper(vocals_path):
     """Devuelve (audio_path, tmp_path_or_None).
@@ -365,11 +416,17 @@ def run_lyrics(vocals_path, output_dir, language=None,
     Formato de salida (`lyrics.json`):
         {"language": "en", "language_probability": 0.98, "duration": 234.5,
          "model": "large-v3",
-         "segments": [{"id": 0, "start": 12.34, "end": 15.67, "text": "..."}, ...]}
+         "segments": [
+           {"id": 0, "start": 12.34, "end": 15.67, "text": "...",
+            "words": [{"start": 12.34, "end": 12.55, "text": "I"}, ...]},
+           ...
+         ]}
 
-    Timestamps a nivel de segmento (frase natural). Word-level no se incluye
-    para no engordar el JSON; se puede activar en el futuro sin romper el
-    formato actual (campo "words" opcional dentro de cada segmento).
+    Timestamps a nivel de segmento (frase natural) Y a nivel de palabra
+    dentro de cada segment. Los segments largos que Whisper devuelve al
+    activar word_timestamps se re-parten por gap de silencio entre palabras
+    (`_LYRICS_WORD_GAP_S`, por defecto 2 s), para karaoke por linea con
+    tramos limpios y `words` para resaltado word-by-word opcional.
 
     Cada llamada CARGA Y LIBERA el modelo. Justificado: lyrics es opt-in y de
     baja frecuencia; asi liberamos VRAM entre jobs para no bloquear la
@@ -413,16 +470,19 @@ def run_lyrics(vocals_path, output_dir, language=None,
     )
 
     segments = []
-    for i, seg in enumerate(segments_iter):
-        text = seg.text.strip()
-        if not text:
-            continue
-        segments.append({
-            "id": i,
-            "start": round(float(seg.start), 3),
-            "end": round(float(seg.end), 3),
-            "text": text,
-        })
+    sid = 0
+    for seg in segments_iter:
+        for sub in _split_by_word_gaps(seg):
+            if not sub["text"]:
+                continue
+            segments.append({
+                "id": sid,
+                "start": sub["start"],
+                "end": sub["end"],
+                "text": sub["text"],
+                "words": sub["words"],
+            })
+            sid += 1
 
     out = {
         "language": info.language,

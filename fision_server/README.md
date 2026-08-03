@@ -259,16 +259,29 @@ DELETE /library/{hash}/lyrics -> removes it (useful for a clean retry)
   "duration": 234.5,
   "model": "large-v3",
   "segments": [
-    {"id": 0, "start": 12.34, "end": 15.67, "text": "I feel the rain on my skin"},
-    {"id": 1, "start": 15.89, "end": 18.42, "text": "No one else can feel it for me"}
+    {
+      "id": 0,
+      "start": 12.34,
+      "end": 15.67,
+      "text": "I feel the rain on my skin",
+      "words": [
+        {"start": 12.34, "end": 12.55, "text": "I"},
+        {"start": 12.55, "end": 12.83, "text": "feel"},
+        {"start": 12.83, "end": 13.02, "text": "the"},
+        {"start": 13.02, "end": 13.51, "text": "rain"}
+      ]
+    }
   ]
 }
 ```
 
-Timestamps are at the **segment (phrase) level**, meant to drive line-by-line
-karaoke rendering. Word-level timestamps are not emitted by default; adding
-them later would populate an optional `words` field inside each segment
-without breaking the current schema.
+Each segment carries both a phrase-level `start`/`end`/`text` (for line-by-line
+karaoke rendering) and a `words` array with per-word timestamps (for optional
+word-by-word highlighting). Long Whisper segments are split at silences
+between consecutive words (default 2 s) so each phrase stays a usable size.
+Word items are always present, but the array may be empty in the rare case
+where Whisper does not emit word alignments for a phrase — clients should
+gracefully fall back to the segment-level timing in that case.
 
 **Reprocessing a song does not lose the lyrics.** When
 `POST /library/{hash}/reprocess` runs, the worker copies any existing
