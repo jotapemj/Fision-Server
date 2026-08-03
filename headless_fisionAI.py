@@ -319,6 +319,14 @@ _LYRICS_INITIAL_PROMPTS = {
 # gap las devuelve a un tamano usable para karaoke por linea.
 _LYRICS_WORD_GAP_S = 2.0
 
+# Post-proc del split: cuando el cantante suelta la primera palabra del verso
+# y hace pausa antes de rematar ("Es" ... "mentira que hoy..."), el split la
+# deja huerfana. Se fusiona hacia adelante si tiene menos de _MIN_WORDS y el
+# gap al siguiente es corto (< _MERGE_GAP_S). Si el gap es grande (p.ej.
+# 27 s antes del estribillo), NO se fusiona: es una pausa musical real.
+_LYRICS_MERGE_MIN_WORDS = 2
+_LYRICS_MERGE_GAP_S = 5.0
+
 
 def _word_to_dict(w):
     """Serializa un faster_whisper.Word a dict del JSON de salida."""
@@ -339,6 +347,38 @@ def _sub_seg_from_words(words):
         "text": text,
         "words": [_word_to_dict(w) for w in words],
     }
+
+
+def _merge_orphan_leads(subs, min_words=_LYRICS_MERGE_MIN_WORDS,
+                        merge_gap_s=_LYRICS_MERGE_GAP_S):
+    """Fusiona sub-segments cortos con el siguiente cuando la pausa entre
+    ambos es breve. Objetivo: evitar sub-segments de 1 palabra ("Es", "Pero")
+    que Whisper produce cuando el cantante suelta la primera palabra del
+    verso y respira antes de continuar. Si el gap con el siguiente supera
+    `merge_gap_s`, la pausa se considera pausa musical real y NO se fusiona
+    (caso "Porque ... [27 s de instrumental] ... aquello que un dia...")."""
+    if not subs:
+        return subs
+    out = []
+    i = 0
+    while i < len(subs):
+        cur = subs[i]
+        if (i + 1 < len(subs)
+                and len(cur["words"]) < min_words
+                and (subs[i + 1]["start"] - cur["end"]) < merge_gap_s):
+            nxt = subs[i + 1]
+            sep = " " if cur["text"] and nxt["text"] else ""
+            out.append({
+                "start": cur["start"],
+                "end": nxt["end"],
+                "text": (cur["text"] + sep + nxt["text"]).strip(),
+                "words": cur["words"] + nxt["words"],
+            })
+            i += 2
+        else:
+            out.append(cur)
+            i += 1
+    return out
 
 
 def _split_by_word_gaps(seg, gap_s=_LYRICS_WORD_GAP_S):
@@ -469,20 +509,24 @@ def run_lyrics(vocals_path, output_dir, language=None,
         initial_prompt=prompt,
     )
 
-    segments = []
-    sid = 0
+    subs = []
     for seg in segments_iter:
         for sub in _split_by_word_gaps(seg):
             if not sub["text"]:
                 continue
-            segments.append({
-                "id": sid,
-                "start": sub["start"],
-                "end": sub["end"],
-                "text": sub["text"],
-                "words": sub["words"],
-            })
-            sid += 1
+            subs.append(sub)
+
+    subs = _merge_orphan_leads(subs)
+
+    segments = []
+    for sid, sub in enumerate(subs):
+        segments.append({
+            "id": sid,
+            "start": sub["start"],
+            "end": sub["end"],
+            "text": sub["text"],
+            "words": sub["words"],
+        })
 
     out = {
         "language": info.language,
