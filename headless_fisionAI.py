@@ -393,16 +393,20 @@ def run_lyrics(vocals_path, output_dir, language=None,
 
     print(f"[whisper] transcribing {audio_for_whisper} "
           f"(language={language or 'auto'}, prompt={'yes' if prompt else 'no'})")
-    # Defaults de Whisper + dos ajustes minimos:
+    # Defaults de Whisper + ajustes minimos:
     # - condition_on_previous_text=False: rompe los bucles de repeticion
     #   infinita al no arrastrar la salida previa como contexto del
     #   siguiente segmento (causa clasica de alucinacion en cadena).
     # - initial_prompt: pequeno ancla al registro "letra de cancion" para
     #   reducir boilerplate tipo "Subtitulos por..." o "Suscribete al canal".
+    # - word_timestamps=True: fija seg.end al fin de la ultima palabra,
+    #   evitando que Whisper infle el end hasta el siguiente segmento
+    #   (o hasta el final del track para el ultimo). Los words se usan
+    #   solo internamente; el JSON de salida no cambia de forma.
     segments_iter, info = model.transcribe(
         str(audio_for_whisper),
         language=language,
-        word_timestamps=False,
+        word_timestamps=True,
         vad_filter=True,                      # ignora silencios largos, ahorra tiempo
         condition_on_previous_text=False,
         initial_prompt=prompt,
