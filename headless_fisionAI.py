@@ -325,7 +325,15 @@ _LYRICS_WORD_GAP_S = 2.0
 # gap al siguiente es corto (< _MERGE_GAP_S). Si el gap es grande (p.ej.
 # 27 s antes del estribillo), NO se fusiona: es una pausa musical real.
 _LYRICS_MERGE_MIN_WORDS = 2
-_LYRICS_MERGE_GAP_S = 5.0
+_LYRICS_MERGE_GAP_S = 6.5
+
+# Cap duro de duracion por sub-segment. Whisper a veces resuelve un verso
+# entero de 10-11 s en un unico segment denso (poco silencio entre palabras
+# porque el cantante encadena las frases). Para karaoke por linea eso no
+# vale. Si un sub-segment excede este limite, se parte por el mayor gap
+# interno entre palabras (recursivo hasta que todos caben o no hay mas
+# donde partir).
+_LYRICS_MAX_SEG_S = 8.0
 
 
 def _word_to_dict(w):
@@ -347,6 +355,49 @@ def _sub_seg_from_words(words):
         "text": text,
         "words": [_word_to_dict(w) for w in words],
     }
+
+
+def _split_long_sub(sub, max_s=_LYRICS_MAX_SEG_S):
+    """Parte un sub-segment demasiado largo por el mayor gap interno entre
+    palabras. Recursivo. Si no hay al menos 2 palabras o el corte no
+    reduciria (segment ya minimo), devuelve el sub tal cual."""
+    duration = float(sub["end"]) - float(sub["start"])
+    words = sub.get("words") or []
+    if duration <= max_s or len(words) < 2:
+        return [sub]
+
+    best_i = -1
+    best_gap = -1.0
+    for i in range(1, len(words)):
+        gap = float(words[i]["start"]) - float(words[i - 1]["end"])
+        if gap > best_gap:
+            best_gap = gap
+            best_i = i
+    if best_i < 1:
+        return [sub]
+
+    left_ws = words[:best_i]
+    right_ws = words[best_i:]
+    left = {
+        "start": left_ws[0]["start"],
+        "end": left_ws[-1]["end"],
+        "text": " ".join(w["text"] for w in left_ws).strip(),
+        "words": left_ws,
+    }
+    right = {
+        "start": right_ws[0]["start"],
+        "end": right_ws[-1]["end"],
+        "text": " ".join(w["text"] for w in right_ws).strip(),
+        "words": right_ws,
+    }
+    return _split_long_sub(left, max_s) + _split_long_sub(right, max_s)
+
+
+def _split_long_subs(subs, max_s=_LYRICS_MAX_SEG_S):
+    out = []
+    for sub in subs:
+        out.extend(_split_long_sub(sub, max_s))
+    return out
 
 
 def _merge_orphan_leads(subs, min_words=_LYRICS_MERGE_MIN_WORDS,
@@ -517,6 +568,7 @@ def run_lyrics(vocals_path, output_dir, language=None,
             subs.append(sub)
 
     subs = _merge_orphan_leads(subs)
+    subs = _split_long_subs(subs)
 
     segments = []
     for sid, sub in enumerate(subs):
