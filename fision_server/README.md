@@ -102,8 +102,33 @@ All configuration is read from environment variables.
 | `FISION_WHISPER_DEVICE`  | `cuda`                   | Device for Whisper inference (`cuda` or `cpu`).    |
 | `FISION_WHISPER_COMPUTE` | `float16`                | Whisper compute type (`float16`/`int8`/...).       |
 | `FISION_WHISPER_MIN_VRAM_MB` | `3072`               | Minimum free VRAM required to start a lyrics job.  |
+| `FISION_WHISPER_BATCH_SIZE` | `0`                   | If `>=2`, enable `BatchedInferencePipeline` (parallel chunks; higher VRAM, faster). |
+| `FISION_SEP_BATCH_SIZE`  | `24`                     | MDXC RoFormer batch size (audio-separator).        |
+| `FISION_SEP_SEGMENT_SIZE`| `512`                    | MDXC segment size.                                 |
+| `FISION_SEP_OVERLAP`     | `4`                      | MDXC overlap.                                      |
+| `FISION_SEP_AUTOCAST`    | `1`                      | Enable autocast in audio-separator (`0` to disable). |
+| `FISION_DEMUCS_SHIFTS`   | `4`                      | HTDemucs random shifts (quality, not VRAM).        |
+| `FISION_DEMUCS_OVERLAP`  | `0.5`                    | HTDemucs segment overlap.                          |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 | `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
+
+### Scaling VRAM usage
+
+The defaults are conservative (Pascal / GTX 1050). On modern cards with
+more VRAM you can raise throughput by tuning the audio-separator MDXC
+batch and segment size, and by enabling Whisper batched inference:
+
+```
+# Ampere+, ~16 GB VRAM
+FISION_SEP_BATCH_SIZE=48
+FISION_SEP_SEGMENT_SIZE=768
+FISION_WHISPER_BATCH_SIZE=8
+```
+
+`FISION_WHISPER_BATCH_SIZE >= 2` wraps the model with
+`BatchedInferencePipeline`; when unset (or `0`/`1`) Whisper runs in the
+classic single-batch mode. `FISION_SEP_AUTOCAST=0` forces fp32 in the
+separator (recommended on Pascal, where fp16 is slower).
 
 
 ## Authentication and user management

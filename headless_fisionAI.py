@@ -527,8 +527,24 @@ def run_lyrics(vocals_path, output_dir, language=None,
     import gc
     from faster_whisper import WhisperModel
 
-    print(f"[whisper] loading model={model_name} device={device} compute={compute_type}")
+    # Batched inference opcional: FISION_WHISPER_BATCH_SIZE >= 2 activa
+    # BatchedInferencePipeline (paraleliza chunks del VAD en la GPU, gasta
+    # mas VRAM a cambio de menos tiempo). 0/1 -> mono-batch clasico.
+    batch_size = int(os.environ.get("FISION_WHISPER_BATCH_SIZE", "0"))
+
+    print(f"[whisper] loading model={model_name} device={device} "
+          f"compute={compute_type} batch={batch_size or 'off'}")
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
+
+    pipeline = None
+    if batch_size >= 2:
+        try:
+            from faster_whisper import BatchedInferencePipeline
+            pipeline = BatchedInferencePipeline(model=model)
+        except Exception as e:
+            print(f"[whisper] BatchedInferencePipeline no disponible ({e}); "
+                  f"cayendo a mono-batch")
+            pipeline = None
 
     # Mezcla lead + coros si el pipeline los separo (modo vocals=split).
     # Suma en dominio temporal a un WAV temporal; se borra al final. Whisper
@@ -551,14 +567,21 @@ def run_lyrics(vocals_path, output_dir, language=None,
     #   evitando que Whisper infle el end hasta el siguiente segmento
     #   (o hasta el final del track para el ultimo). Los words se usan
     #   solo internamente; el JSON de salida no cambia de forma.
-    segments_iter, info = model.transcribe(
-        str(audio_for_whisper),
+    transcribe_kwargs = dict(
         language=language,
         word_timestamps=True,
         vad_filter=True,                      # ignora silencios largos, ahorra tiempo
         condition_on_previous_text=False,
         initial_prompt=prompt,
     )
+    if pipeline is not None:
+        segments_iter, info = pipeline.transcribe(
+            str(audio_for_whisper), batch_size=batch_size, **transcribe_kwargs,
+        )
+    else:
+        segments_iter, info = model.transcribe(
+            str(audio_for_whisper), **transcribe_kwargs,
+        )
 
     subs = []
     for seg in segments_iter:

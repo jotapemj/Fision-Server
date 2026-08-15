@@ -164,27 +164,53 @@ def drop_demucs_vocals(output_dir):
 
 # -------------------------------------------------------------- SEPARATOR ----
 def build_separator(output_dir):
-    """Un unico Separator para todo el pipeline. Tuning para Pascal (GTX 1050)."""
+    """Un unico Separator para todo el pipeline.
+
+    Parametros exprimibles via env (prefijo FISION_):
+      FISION_SEP_BATCH_SIZE    default 24   (MDXC RoFormer)
+      FISION_SEP_SEGMENT_SIZE  default 512
+      FISION_SEP_OVERLAP       default 4
+      FISION_SEP_AUTOCAST      default 1    (1=True, 0=False)
+      FISION_DEMUCS_SHIFTS     default 4    (calidad, no VRAM)
+      FISION_DEMUCS_OVERLAP    default 0.5
+
+    Defaults conservadores (tuning Pascal / GTX 1050). Con 16 GB se
+    puede subir batch_size a 40-64 y segment_size a 768/1024 para
+    reducir pases y ganar velocidad. En Ampere+ autocast fp16 tiene
+    sentido; en Pascal fp16 va lentisimo, dejar autocast en 0 (fp32).
+    """
     try:
         import torch
         print(f"CUDA disponible: {torch.cuda.is_available()}")
     except Exception:
         pass
 
+    batch_size     = int(os.environ.get("FISION_SEP_BATCH_SIZE", "24"))
+    segment_size   = int(os.environ.get("FISION_SEP_SEGMENT_SIZE", "512"))
+    overlap        = int(os.environ.get("FISION_SEP_OVERLAP", "4"))
+    autocast       = os.environ.get("FISION_SEP_AUTOCAST", "1").strip() \
+                        not in ("0", "false", "False")
+    demucs_shifts  = int(os.environ.get("FISION_DEMUCS_SHIFTS", "4"))
+    demucs_overlap = float(os.environ.get("FISION_DEMUCS_OVERLAP", "0.5"))
+
+    print(f"[sep] batch_size={batch_size} segment={segment_size} "
+          f"overlap={overlap} autocast={autocast} "
+          f"demucs_shifts={demucs_shifts} demucs_overlap={demucs_overlap}")
+
     return Separator(
         output_dir=output_dir,
         output_format="FLAC",
-        use_autocast=True,            # fp32: en Pascal fp16 va lentisimo
+        use_autocast=autocast,
         mdxc_params={                  # solo afecta a los RoFormer (MDXC)
-            "segment_size": 512,
+            "segment_size": segment_size,
             "override_model_segment_size": False,
-            "overlap": 4,
-            "batch_size": 24,
+            "overlap": overlap,
+            "batch_size": batch_size,
             "pitch_shift": 0,
         },
         demucs_params={                # solo afecta a HTDemucs
-            "shifts": 4,               # default 2. baja a 1 para casi el doble de velocidad
-            "overlap": 0.5,
+            "shifts": demucs_shifts,
+            "overlap": demucs_overlap,
             "segments_enabled": True,
         },
     )
