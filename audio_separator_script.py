@@ -173,6 +173,8 @@ def build_separator(output_dir):
       FISION_SEP_AUTOCAST      default 1    (1=True, 0=False)
       FISION_DEMUCS_SHIFTS     default 4    (calidad, no VRAM)
       FISION_DEMUCS_OVERLAP    default 0.5
+      FISION_SEP_MODEL_DIR     default ~/.cache/audio-separator-models
+                               (persistente; el default de la lib es /tmp)
 
     Defaults conservadores (tuning Pascal / GTX 1050). Con 16 GB se
     puede subir batch_size a 40-64 y segment_size a 768/1024 para
@@ -192,13 +194,18 @@ def build_separator(output_dir):
                         not in ("0", "false", "False")
     demucs_shifts  = int(os.environ.get("FISION_DEMUCS_SHIFTS", "4"))
     demucs_overlap = float(os.environ.get("FISION_DEMUCS_OVERLAP", "0.5"))
+    # Pesos fuera de /tmp: en tmpfs se pierden en cada reinicio
+    model_dir      = os.path.expanduser(os.environ.get(
+        "FISION_SEP_MODEL_DIR", "~/.cache/audio-separator-models"))
 
     print(f"[sep] batch_size={batch_size} segment={segment_size} "
           f"overlap={overlap} autocast={autocast} "
-          f"demucs_shifts={demucs_shifts} demucs_overlap={demucs_overlap}")
+          f"demucs_shifts={demucs_shifts} demucs_overlap={demucs_overlap} "
+          f"model_dir={model_dir}")
 
     return Separator(
         output_dir=output_dir,
+        model_file_dir=model_dir,
         output_format="FLAC",
         use_autocast=autocast,
         mdxc_params={                  # solo afecta a los RoFormer (MDXC)

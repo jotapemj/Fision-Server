@@ -109,6 +109,7 @@ All configuration is read from environment variables.
 | `FISION_SEP_AUTOCAST`    | `1`                      | Enable autocast in audio-separator (`0` to disable). |
 | `FISION_DEMUCS_SHIFTS`   | `4`                      | HTDemucs random shifts (quality, not VRAM).        |
 | `FISION_DEMUCS_OVERLAP`  | `0.5`                    | HTDemucs segment overlap.                          |
+| `FISION_SEP_MODEL_DIR`   | `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 | `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
 
