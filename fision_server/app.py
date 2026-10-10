@@ -73,8 +73,12 @@ def health():
 # --------------------------------------------------------------- server info ----
 @app.get("/server/info")
 def server_info(user: str = Depends(current_user)):
-    """Info cacheada al arrancar + version del server (SemVer)."""
-    return {**gpu.info(), "version": __version__}
+    """Info cacheada al arrancar + VRAM libre en vivo + version (SemVer)."""
+    # vram_free_mb en vivo; vram_min_mb = umbral del gate, para el warning
+    return {**gpu.info(),
+            "vram_free_mb": gpu.vram_free_mb(),
+            "vram_min_mb": config.GPU_MIN_VRAM_MB,
+            "version": __version__}
 
 
 # ------------------------------------------------------------------- auth ----

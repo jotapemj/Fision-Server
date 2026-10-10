@@ -206,12 +206,20 @@ GET /server/info
   "gpu_name": "NVIDIA GeForce RTX 3060",
   "vram_total_mb": 12288,
   "driver": "550.54.15",
-  "version": "1.1.0"
+  "vram_free_mb": 10840,
+  "vram_min_mb": 4096,
+  "version": "1.4.0"
 }
 ```
 
-When `gpu` is `false`, the other GPU fields are empty. `nvidia-smi` is queried
-without loading PyTorch, so the endpoint is cheap and does not warm up CUDA.
+When `gpu` is `false`, the other GPU fields are empty and `vram_free_mb` is
+`0`. `gpu_name`, `vram_total_mb` and `driver` come from the startup cache;
+`vram_free_mb` is queried live on every request. `vram_min_mb` is the value of
+`FISION_GPU_MIN_VRAM_MB`, the threshold used by the job gate described below.
+Clients can compare both fields to warn the user before submitting a CUDA job
+(`vram_free_mb < vram_min_mb` means the job would enter `waiting_gpu`).
+`nvidia-smi` is queried without loading PyTorch, so the endpoint is cheap and
+does not warm up CUDA.
 The `version` field carries the server's own release (see
 [Versioning](#versioning)).
 
