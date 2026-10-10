@@ -143,3 +143,12 @@ per-segment timestamps) into `<output_dir>`.
   same weights, MIT).
 
 Each model keeps its own license; check upstream before redistribution.
+
+## License
+
+Fision is licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). Running a
+modified version as a network service requires making its complete source
+code available to the users of that service.
+
+The BTC submodule keeps its original MIT license.

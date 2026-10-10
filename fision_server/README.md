@@ -406,4 +406,4 @@ inner wall and the network layer as the outer one.
 
 ## License
 
-See the root repository.
+AGPL-3.0. See [LICENSE](../LICENSE) in the repository root.
