@@ -53,6 +53,9 @@ library/<user>/<hash>/
     stems/          current separation
     result.zip      zip of the current separation
 
+library/.incoming/  uploads in progress; same filesystem as the library so the
+                    final move is an atomic rename. Emptied on startup.
+
 data/
     users.json      accounts: username + argon2 password hash + token epoch
     secret.key      token-signing key (auto-generated; deleting it logs everyone out)
@@ -99,6 +102,8 @@ All configuration is read from environment variables.
 | `FISION_GPU_MIN_VRAM_MB` | `4096`                   | Minimum free VRAM required to start a CUDA job.    |
 | `FISION_GPU_POLL_SEC`    | `30`                     | Poll interval while a job waits for free VRAM.     |
 | `FISION_GPU_WAIT_TIMEOUT_SEC` | `600`               | Hard timeout waiting for VRAM; aborts the job.     |
+| `FISION_JOB_TIMEOUT_SEC` | `2400`                   | Maximum run time of a separation job, excluding the wait for VRAM. On expiry the whole process group is killed and the job ends with `timeout`. `0` disables it. |
+| `FISION_LYRICS_TIMEOUT_SEC` | `900`                 | Same limit for lyrics jobs.                        |
 | `FISION_WHISPER_MODEL`   | `large-v3`               | faster-whisper checkpoint used for lyrics.         |
 | `FISION_WHISPER_DEVICE`  | `cuda`                   | Device for Whisper inference (`cuda` or `cpu`).    |
 | `FISION_WHISPER_COMPUTE` | `float16`                | Whisper compute type (`float16`/`int8`/...).       |

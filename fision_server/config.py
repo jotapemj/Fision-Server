@@ -78,6 +78,17 @@ WHISPER_MIN_VRAM_MB = int(os.environ.get("FISION_WHISPER_MIN_VRAM_MB", "3072"))
 
 LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
 
+# Subidas a medias. Mismo disco que la biblioteca: mover = rename atomico y
+# sin pasar por /tmp (que puede ser tmpfs = RAM). Se vacia al arrancar.
+INCOMING_DIR = LIBRARY_DIR / ".incoming"
+INCOMING_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------- timeouts ----
+# Tope de un job (sin contar la espera de GPU). Al vencer se mata el grupo
+# de procesos entero y el job queda en error. Holgado para GPUs lentas / CPU.
+JOB_TIMEOUT_SEC = int(os.environ.get("FISION_JOB_TIMEOUT_SEC", "2400"))
+LYRICS_TIMEOUT_SEC = int(os.environ.get("FISION_LYRICS_TIMEOUT_SEC", "900"))
+
 # --------------------------------------------------------------- auth/data ----
 # Carpeta persistente para datos del servidor (users, clave de firma).
 # En Docker: montala como volumen, igual que library/.

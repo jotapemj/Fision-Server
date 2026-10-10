@@ -1,12 +1,62 @@
 """
 Puente al orquestador. Lo llama como SUBPROCESO (aislado): si revienta, no se
 lleva por delante al servidor. Mismo patron que la GUI con el separador.
+
+Cada job corre en su propio grupo de procesos: el orquestador lanza a su vez
+el separador como hijo, y cancelar/timeout tiene que matar a todos (si no, el
+nieto sigue ocupando GPU).
 """
+import os
 import json
+import signal
 import subprocess
 from pathlib import Path
 
 from . import config
+
+_POSIX = os.name == "posix"
+
+
+class JobTimeout(RuntimeError):
+    """El subproceso supero su tope de tiempo."""
+
+
+def _popen(cmd):
+    # Grupo propio en POSIX para poder matar hijos y nietos de golpe
+    return subprocess.Popen(cmd, start_new_session=_POSIX)
+
+
+def stop(proc, grace=15):
+    """Termina el job entero (grupo de procesos). SIGTERM, y SIGKILL si no cae."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        if _POSIX:
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        if _POSIX:
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        proc.wait()
+    except ProcessLookupError:
+        pass
+
+
+def _run(cmd, timeout, on_proc, what):
+    proc = _popen(cmd)
+    if on_proc:
+        on_proc(proc)                 # el worker lo guarda para poder cancelar
+    try:
+        ret = proc.wait(timeout=timeout if timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        stop(proc)
+        raise JobTimeout(f"timeout ({timeout} s)")
+    if ret != 0:
+        raise RuntimeError(f"{what} fallo (codigo {ret})")
 
 
 def process(input_path, out_stems_dir, cfg, on_proc=None):
@@ -19,12 +69,7 @@ def process(input_path, out_stems_dir, cfg, on_proc=None):
         json.dump(cfg, f, ensure_ascii=False)
 
     cmd = config.cli_command(input_path, out_stems_dir, cfg_file)
-    proc = subprocess.Popen(cmd)
-    if on_proc:
-        on_proc(proc)                 # el worker lo guarda para poder cancelar
-    ret = proc.wait()
-    if ret != 0:
-        raise RuntimeError(f"orquestador fallo (codigo {ret})")
+    _run(cmd, config.JOB_TIMEOUT_SEC, on_proc, "orquestador")
 
 
 def process_lyrics(vocals_path, out_stems_dir, language=None, device=None,
@@ -39,9 +84,4 @@ def process_lyrics(vocals_path, out_stems_dir, language=None, device=None,
 
     cmd = config.lyrics_cli_command(vocals_path, out_stems_dir, language,
                                     device=device, compute=compute)
-    proc = subprocess.Popen(cmd)
-    if on_proc:
-        on_proc(proc)
-    ret = proc.wait()
-    if ret != 0:
-        raise RuntimeError(f"lyrics CLI fallo (codigo {ret})")
+    _run(cmd, config.LYRICS_TIMEOUT_SEC, on_proc, "lyrics CLI")

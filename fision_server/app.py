@@ -130,7 +130,7 @@ def avatar_get(user: str = Depends(current_user)):
 async def avatar_put(file: UploadFile = File(...),
                      user: str = Depends(current_user)):
     limit = config.MAX_AVATAR_MB * 1024 * 1024
-    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp = tempfile.NamedTemporaryFile(delete=False, dir=config.INCOMING_DIR)
     size = 0
     head = b""
     try:
@@ -182,7 +182,8 @@ def _require_hash(h):
 
 async def _save_upload(file: UploadFile):
     ext = os.path.splitext(file.filename or "audio")[1].lower() or ".bin"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext,
+                                      dir=config.INCOMING_DIR)
     size = 0
     try:
         while True:

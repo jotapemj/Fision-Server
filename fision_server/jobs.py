@@ -189,6 +189,7 @@ def list_active(user):
 # --------------------------------------------------------------- cancelar ----
 def cancel_job(jid, user=None):
     revert = None
+    to_stop = None
     with _cond:
         job = _jobs.get(jid)
         if not _owned(job, user):
@@ -199,17 +200,17 @@ def cancel_job(jid, user=None):
             _persist()
         elif job["estado"] in ("running", "waiting_gpu") and _current["job_id"] == jid:
             job["estado"] = "cancelled"
-            proc = _current["proc"]
-            if proc:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
             # Si estaba en waiting_gpu no hay proc: el bucle de espera detecta
             # el cambio a "cancelled" y sale limpio.
-            return True                      # el worker limpia y persiste al caer
+            to_stop = _current["proc"]
         else:
             return False
+
+    if to_stop:
+        # Fuera del lock y en hilo: stop() puede esperar la gracia del SIGTERM.
+        # Mata el grupo entero (orquestador + separador). El worker limpia.
+        threading.Thread(target=pipeline.stop, args=(to_stop,), daemon=True).start()
+        return True
 
     if revert:
         _revert_meta(revert[0], revert[1], was_cancelled=True)
@@ -273,6 +274,13 @@ def recover():
                 lib.discard_tmp(meta["hash"])
                 _revert_meta(user, meta["hash"], was_cancelled=False)
                 swept += 1
+
+    # Subidas cortadas por la caida: al arrancar no hay ninguna en vuelo.
+    for f in config.INCOMING_DIR.iterdir():
+        try:
+            f.unlink()
+        except OSError:
+            pass
 
     log.event("queue.recover", recovered=recovered, swept=swept)
     if recovered:
@@ -490,6 +498,8 @@ def _worker():
             job["estado"] = "done"
 
         except Exception as e:
+            if isinstance(e, pipeline.JobTimeout):
+                log.event("job.timeout", job_id=jid, kind=kind)
             was_cancelled = job["estado"] == "cancelled"
             job["estado"] = "cancelled" if was_cancelled else "error"
             job["error"] = str(e)
