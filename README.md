@@ -64,19 +64,39 @@ cd Fision
 # (if you forgot --recurse-submodules)
 git submodule update --init --recursive
 
-# 2. Python 3.10+ virtual environment
-python3 -m venv venv
+# 2. Python 3.12 virtual environment
+python3.12 -m venv venv
 source venv/bin/activate            # Windows: venv\Scripts\activate
 
 # 3. System deps (not pip)
 sudo apt install ffmpeg python3-tk  # ffmpeg for audio; python3-tk for the GUI
 
-# 4. PyTorch FIRST, with the CUDA index for your GPU
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# 4. PyTorch FIRST, with the CUDA index for your GPU (table below)
+pip install torch==2.13.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130
 
 # 5. Everything else
 pip install -r requirements.txt
 ```
+
+### Choosing the PyTorch index
+
+The index depends on the GPU generation and the NVIDIA driver installed.
+
+| GPU                                             | Driver   | Index   |
+|-------------------------------------------------|----------|---------|
+| Turing and newer (RTX 20xx, 30xx, 40xx, 50xx)   | >= 580   | `cu130` |
+| Maxwell, Pascal, Volta (GTX 9xx, GTX 10xx, V100), or an older driver | >= 560 | `cu126` |
+| No NVIDIA GPU                                   | -        | `cpu`   |
+
+`cu130` wheels ship kernels for `sm_75` to `sm_120` only. Check the driver with
+`nvidia-smi` and the result with
+`python -c "import torch; print(torch.cuda.get_arch_list())"`.
+`torchaudio` stays at 2.11.0: no newer release exists, and it is only used by
+`beat_this`.
+
+All other dependencies are pinned in `requirements.txt` to the validated stack.
+Whisper ships its own CUDA 12 libraries (`nvidia-cublas-cu12`,
+`nvidia-cudnn-cu12`), independent of the PyTorch index.
 
 ### Model weights
 

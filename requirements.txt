@@ -1,13 +1,17 @@
 # ==========================================================================
 # Fision - requirements
 #
-# Install PyTorch SEPARATELY, first, with the correct CUDA index. Installing
-# torch from here would pull the CPU build (slow). For a modern GPU
-# (e.g. RTX 4060 Ti):
+# Exact versions: this is the stack validated in production (Python 3.12,
+# Linux, RTX 3090). Upgrading any of them can change separation quality or
+# speed; do it deliberately and re-test.
 #
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Install PyTorch SEPARATELY, first, with the CUDA index that matches your GPU
+# (see "Install" in README.md). Installing torch from here would pull the
+# CPU build. Validated pair:
 #
-# (adjust cu128 to your CUDA version). THEN:  pip install -r requirements.txt
+#   pip install torch==2.13.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130
+#
+# THEN:  pip install -r requirements.txt
 #
 # System dependencies (not pip):
 #   sudo apt install ffmpeg python3-tk
@@ -15,44 +19,43 @@
 # ==========================================================================
 
 # ---- Server (FastAPI) ----
-fastapi
-uvicorn[standard]
-python-multipart
-argon2-cffi
-PyJWT
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+argon2-cffi==25.1.0
+PyJWT==2.13.0
 
 # ---- Audio metadata (tags/cover) ----
-mutagen
+mutagen==1.48.1
 
 # ---- Stem separation (GPU engine) ----
-audio-separator
-onnxruntime-gpu
+# 0.47 cambia la semantica de overlap en RoFormer: no subir sin re-tunear.
+# Sin onnxruntime-gpu: ningun modelo del pipeline es ONNX, y choca con el
+# onnxruntime (CPU) que exige faster-whisper.
+audio-separator==0.44.3
 
 # ---- Beats (beat_this + madmom DBN postprocessor) ----
 # madmom master compila limpio con Cython 3 + numpy 2 + Python 3.12
 # (necesario: el PyPI 0.16.1 de 2018 esta anclado a Cython <3).
-beat-this @ git+https://github.com/CPJKU/beat_this.git
-madmom @ git+https://github.com/CPJKU/madmom.git
+beat-this @ git+https://github.com/CPJKU/beat_this.git@b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c
+madmom @ git+https://github.com/CPJKU/madmom.git@27f032e8947204902c675e5e341a3faf5dc86dae
 
 # ---- Lyrics (Whisper via faster-whisper) ----
-# Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper. Cache del
-# modelo en ~/.cache/huggingface/hub/ (se baja en primer arranque).
-faster-whisper
-# CTranslate2 no reutiliza cuBLAS/cuDNN de PyTorch: necesita los suyos.
-# Los paquetes pip de NVIDIA publican wheels Linux Y Windows con las
-# shared libs dentro de site-packages/nvidia/*/lib (o /bin en Windows).
-# Instalarlos siempre; el que corra Fision solo en CPU puede desinstalarlos
-# a mano (unos 500 MB) sin afectar al resto del stack.
-nvidia-cublas-cu12
-nvidia-cudnn-cu12
+# Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper.
+faster-whisper==1.2.1
+# CTranslate2 no reutiliza cuBLAS/cuDNN de PyTorch: necesita los suyos (CUDA
+# 12, independientes del indice de torch). Wheels Linux y Windows. Quien corra
+# solo en CPU puede desinstalarlos (unos 500 MB) sin afectar al resto.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.25.0.15
 
 # ---- Audio / IO ----
-soundfile
-pydub
-numpy
+soundfile==0.14.0
+pydub==0.25.1
+numpy==2.4.6
 
 # ---- BTC submodule deps (chords) ----
-librosa
-mir_eval
-pretty_midi
-PyYAML
+librosa==0.11.0
+mir_eval==0.8.2
+pretty_midi==0.2.11
+PyYAML==6.0.3

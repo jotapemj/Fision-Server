@@ -2,7 +2,7 @@
 
 Self-hosted, multi-user server for audio stem separation and music analysis.
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12-blue)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
 ![PyTorch](https://img.shields.io/badge/ML-PyTorch-ee4c2c)
 
@@ -62,10 +62,11 @@ data/
 ## Requirements
 
 The heavy stack (PyTorch with the CUDA index, `audio-separator`, `beat_this`,
-BTC, ffmpeg) is installed from the **root repository**. The server itself adds:
+BTC, ffmpeg) is installed from the **root repository**. The server itself adds
+the following, pinned in the root `requirements.txt`:
 
 ```
-fastapi  uvicorn  python-multipart  pydantic  mutagen  argon2-cffi  PyJWT
+fastapi  uvicorn  python-multipart  mutagen  argon2-cffi  PyJWT
 ```
 
 ## Quick start
