@@ -94,6 +94,8 @@ All configuration is read from environment variables.
 | `FISION_LOCAL_USER`      | `local`                  | Default owner for local GUI/CLI saves.             |
 | `FISION_SECRET`          | *(auto-generated)*       | Token-signing key. Persisted to `data/secret.key`. |
 | `FISION_TOKEN_TTL_HOURS` | `720`                    | Session lifetime (default 30 days).                |
+| `FISION_LOGIN_MAX_FAILS` | `5`                      | Failed logins per IP and username before `429`. `0` disables the limit. |
+| `FISION_LOGIN_WINDOW_SEC` | `300`                   | Window for counting failed logins.                 |
 | `FISION_LOG_LEVEL`       | `INFO`                   | Log verbosity.                                     |
 | `FISION_HOST`            | `0.0.0.0`                | Bind address.                                      |
 | `FISION_PORT`            | `8000`                   | Bind port.                                         |
@@ -161,6 +163,13 @@ Usernames are slugs matching `[a-z0-9_]` (2-32 characters); the username also
 serves as the library folder name. Passwords are hashed with **argon2** and are
 never stored in clear text.
 
+Failed logins are limited per client IP and username: after
+`FISION_LOGIN_MAX_FAILS` failures within `FISION_LOGIN_WINDOW_SEC`, `/login`
+answers `429` with a `Retry-After` header until the oldest failure expires. A
+successful login resets the counter. The counter is held in memory and resets
+when the server restarts. Unknown usernames take the same verification time as
+existing ones, so response timing does not reveal which accounts exist.
+
 ## API
 
 All routes except `/health` and `/login` require `Authorization: Bearer <token>`.
@@ -187,6 +196,15 @@ All routes except `/health` and `/login` require `Authorization: Bearer <token>`
 | POST   | `/library/{hash}/lyrics`      | Enqueue a Whisper transcription over `vocals.flac`.|
 | GET    | `/library/{hash}/lyrics`      | Serve `lyrics.json` (404 if not generated yet).   |
 | DELETE | `/library/{hash}/lyrics`      | Remove the current `lyrics.json`.                 |
+
+Request validation on `POST /jobs` and `POST /library/{hash}/reprocess`:
+
+- `config_json` must be a JSON object; anything else returns `400`.
+- The uploaded file name must end in `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`,
+  `.ogg`, `.opus`, `.aiff`, `.aif` or `.wma`; otherwise `415` is returned and
+  nothing is stored. Clients must send the original file name, extension
+  included.
+- Files above `FISION_MAX_UPLOAD_MB` return `413`.
 
 ### Pipeline contract
 
@@ -355,6 +373,7 @@ prefixes are emitted:
 ... AUDIT  user.create user=alice
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials
+... AUDIT  login.blocked user=alice ip=100.64.0.7
 ... AUDIT  password_change.success user=alice
 ... AUDIT  avatar.set user=alice
 ... AUDIT  avatar.delete user=alice

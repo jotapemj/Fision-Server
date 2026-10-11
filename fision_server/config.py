@@ -101,6 +101,10 @@ QUEUE_FILE = DATA_DIR / "queue.json"     # cola persistida (sobrevive reinicios)
 AVATARS_DIR = DATA_DIR / "avatars"       # foto de perfil por usuario
 AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Login: N fallos por (IP, usuario) dentro de la ventana -> 429. 0 = sin limite.
+LOGIN_MAX_FAILS = int(os.environ.get("FISION_LOGIN_MAX_FAILS", "5"))
+LOGIN_WINDOW_SEC = int(os.environ.get("FISION_LOGIN_WINDOW_SEC", "300"))
+
 # Duracion del token de sesion. 720h = 30 dias (comodo para app movil).
 TOKEN_TTL_HOURS = int(os.environ.get("FISION_TOKEN_TTL_HOURS", "720"))
 

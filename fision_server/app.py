@@ -2,7 +2,7 @@
 API HTTP de Fision. La app movil habla con estos endpoints.
 
   --- auth ---
-  POST   /login                     user+password -> devuelve token
+  POST   /login                     user+password -> devuelve token (429 si abusa)
   POST   /auth/change-password      cambia tu password (token vigente)
 
   --- trabajo (todo bajo TU biblioteca: library/<user>/) ---
@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from . import (config, library, jobs, users, security, log, avatars, gpu,
-               __version__)
+               ratelimit, __version__)
 from .auth import current_user, bearer_token
 
 
@@ -88,12 +88,21 @@ class LoginIn(BaseModel):
 
 
 @app.post("/login")
-def login(body: LoginIn):
+def login(body: LoginIn, request: Request):
     name = (body.username or "").strip().lower()
-    if users.exists(name) and users.verify(name, body.password):
+    ip = request.client.host if request.client else "-"
+    wait = ratelimit.retry_after(ip, name)
+    if wait:
+        log.event("login.blocked", user=name or "-", ip=ip)
+        raise HTTPException(status_code=429, detail="Demasiados intentos",
+                            headers={"Retry-After": str(wait)})
+    # verify() siempre: con usuario inexistente gasta lo mismo (hash señuelo)
+    if users.verify(name, body.password):
+        ratelimit.clear(ip, name)
         token = security.issue(name)
         log.event("login.success", user=name)
         return {"token": token, "user": name}
+    ratelimit.fail(ip, name)
     log.event("login.fail", user=name or "-", reason="bad_credentials")
     raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
 
@@ -180,8 +189,26 @@ def _require_hash(h):
         raise HTTPException(404, "No existe")
 
 
+# Formatos que decodifica el pipeline (ffmpeg). Resto -> 415 sin escribir nada.
+AUDIO_EXTS = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus",
+              ".aiff", ".aif", ".wma"}
+
+
+def _parse_cfg(config_json):
+    """config_json -> dict. Basura o no-objeto -> 400 (antes reventaba en 500)."""
+    try:
+        cfg = json.loads(config_json or "{}")
+    except ValueError:
+        raise HTTPException(400, "config_json no es JSON valido")
+    if not isinstance(cfg, dict):
+        raise HTTPException(400, "config_json debe ser un objeto")
+    return cfg
+
+
 async def _save_upload(file: UploadFile):
-    ext = os.path.splitext(file.filename or "audio")[1].lower() or ".bin"
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in AUDIO_EXTS:
+        raise HTTPException(415, "Formato de audio no soportado")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext,
                                       dir=config.INCOMING_DIR)
     size = 0
@@ -205,7 +232,7 @@ async def _save_upload(file: UploadFile):
 async def submit(file: UploadFile = File(...), config_json: str = Form("{}"),
                  user: str = Depends(current_user)):
     lib = library.for_user(user)
-    cfg = json.loads(config_json or "{}")
+    cfg = _parse_cfg(config_json)
     tmp_path, ext = await _save_upload(file)
     h = library.hash_file(tmp_path)
 
@@ -227,7 +254,7 @@ async def reprocess(h: str, config_json: str = Form("{}"),
     lib = library.for_user(user)
     if not lib.exists(h) or lib.input_path(h) is None:
         raise HTTPException(404, "No existe ese audio")
-    cfg = json.loads(config_json or "{}")
+    cfg = _parse_cfg(config_json)
     meta = lib.read_meta(h) or {}
     job = jobs.create_job(user, h, meta.get("nombre", h), cfg, reprocess=True)
     return {"hash": h, "job_id": job["job_id"], "estado": job["estado"]}

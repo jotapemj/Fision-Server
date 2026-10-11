@@ -26,6 +26,7 @@ from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHas
 from . import config
 
 _ph = PasswordHasher()
+_dummy_hash = None              # señuelo: iguala el tiempo si el usuario no existe
 _USER_RE = re.compile(r"^[a-z0-9_]{2,32}$")
 
 
@@ -111,6 +112,14 @@ def verify(name, password):
     data = _load()
     u = data.get(name)
     if not u:
+        # Mismo coste argon2 que un usuario real: no revela si existe
+        global _dummy_hash
+        if _dummy_hash is None:
+            _dummy_hash = _ph.hash(os.urandom(16).hex())
+        try:
+            _ph.verify(_dummy_hash, password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            pass
         return False
     try:
         _ph.verify(u["pwd_hash"], password)
