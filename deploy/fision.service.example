@@ -1,0 +1,57 @@
+# Fision server - example systemd unit.
+#
+# Copy to /etc/systemd/system/fision.service and adjust:
+#   - User/Group, WorkingDirectory and the venv path.
+#   - Storage paths: keep data, library and model weights outside the repo,
+#     on persistent disks (never a RAM-backed /tmp).
+#   - RequiresMountsFor: every mount point used below, so the service waits
+#     for the disks.
+# Then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fision
+
+[Unit]
+Description=Fision server (stem separation, beats, chords, lyrics)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/fision
+
+[Service]
+Type=simple
+User=fision
+Group=fision
+WorkingDirectory=/opt/fision
+ExecStart=/opt/fision/.venv/bin/python -m fision_server.run
+
+# Storage
+Environment=FISION_DATA=/srv/fision/data
+Environment=FISION_LIBRARY=/srv/fision/library
+Environment=FISION_MODELS_DIR=/srv/fision/models
+
+# Network
+Environment=FISION_HOST=0.0.0.0
+Environment=FISION_PORT=8000
+
+# Lyrics
+Environment=FISION_WHISPER_MODEL=large-v3
+#Environment=FISION_WHISPER_BATCH_SIZE=8
+
+# VRAM tuning (see "Scaling VRAM usage" in fision_server/README.md)
+#Environment=FISION_SEP_BATCH_SIZE=48
+#Environment=FISION_SEP_SEGMENT_SIZE=768
+
+# Job limits (seconds, 0 = no limit)
+#Environment=FISION_JOB_TIMEOUT_SEC=2400
+#Environment=FISION_LYRICS_TIMEOUT_SEC=900
+
+# Unbuffered output so progress reaches the journal in real time
+Environment=PYTHONUNBUFFERED=1
+
+# Cancel/stop kills the whole job process group; give it time to exit
+KillMode=control-group
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

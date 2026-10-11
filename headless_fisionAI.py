@@ -12,6 +12,27 @@ import numpy as np
 import subprocess
 import re
 
+
+def _apply_models_dir():
+    """FISION_MODELS_DIR -> una raiz para todos los pesos.
+
+    Rellena solo lo que no venga ya fijado (las envs concretas mandan).
+    Antes de cualquier import pesado: HF lee HF_HOME al importarse. Los
+    subprocesos (separador) heredan os.environ.
+    """
+    root = os.environ.get("FISION_MODELS_DIR", "").strip()
+    if not root:
+        return
+    root = os.path.abspath(os.path.expanduser(root))
+    for env, sub in (("FISION_SEP_MODEL_DIR", "separator"),   # audio-separator
+                     ("HF_HOME", "hf"),                        # faster-whisper
+                     ("TORCH_HOME", "torch")):                 # beat_this
+        if not os.environ.get(env, "").strip():
+            os.environ[env] = os.path.join(root, sub)
+
+
+_apply_models_dir()
+
 _clic_seg = AudioSegment.from_file('resources/metronome.wav')
 
 def _extract_cover_bytes(input_file: str):

@@ -115,7 +115,8 @@ All configuration is read from environment variables.
 | `FISION_SEP_AUTOCAST`    | `1`                      | Enable autocast in audio-separator (`0` to disable). |
 | `FISION_DEMUCS_SHIFTS`   | `4`                      | HTDemucs random shifts (quality, not VRAM).        |
 | `FISION_DEMUCS_OVERLAP`  | `0.5`                    | HTDemucs segment overlap.                          |
-| `FISION_SEP_MODEL_DIR`   | `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
+| `FISION_MODELS_DIR`      | *(unset)*                | Single root for all model weights: `separator/`, `hf/` and `torch/` subdirectories. See *Model weights* in the main README. |
+| `FISION_SEP_MODEL_DIR`   | `$FISION_MODELS_DIR/separator` or `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 | `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
 
@@ -394,6 +395,22 @@ incompatibilities: mismatching MAJOR means the client must upgrade before
 new jobs will be accepted.
 
 ## Deployment
+
+### systemd
+
+`deploy/fision.service.example` is a template unit. Copy it to
+`/etc/systemd/system/fision.service`, adjust user, paths and environment, then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now fision
+```
+
+Keep `FISION_DATA`, `FISION_LIBRARY` and `FISION_MODELS_DIR` outside the
+repository checkout, and list their mount points in `RequiresMountsFor=` so the
+service does not start before the disks are mounted.
+
+### Network exposure
 
 The token layer applies regardless of how the server is exposed; treat it as the
 inner wall and the network layer as the outer one.

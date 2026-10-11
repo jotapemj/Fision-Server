@@ -100,10 +100,26 @@ Whisper ships its own CUDA 12 libraries (`nvidia-cublas-cu12`,
 
 ### Model weights
 
-The separation models are downloaded automatically by `audio-separator` on
-first run. The **BTC chord model** weights ship inside the submodule
+The separation models (`audio-separator`), the Whisper checkpoint
+(`faster-whisper`) and the `beat_this` checkpoints are downloaded automatically
+on first use. The **BTC chord model** weights ship inside the submodule
 (`BTC-ISMIR19/test/btc_model_large_voca.pt`), so a recursive clone already has
-everything — nothing else to download.
+them.
+
+The download location is set with `FISION_MODELS_DIR`. When it is defined, all
+weights live under a single root:
+
+| Subdirectory | Contents                  | Overridden by          |
+|--------------|---------------------------|------------------------|
+| `separator/` | `audio-separator` models  | `FISION_SEP_MODEL_DIR` |
+| `hf/`        | Whisper (Hugging Face)    | `HF_HOME`              |
+| `torch/`     | `beat_this` checkpoints   | `TORCH_HOME`           |
+
+A specific variable, when set, takes precedence over the root. When
+`FISION_MODELS_DIR` is not defined, each library keeps its usual default
+(`~/.cache/audio-separator-models`, `~/.cache/huggingface`, `~/.cache/torch`).
+Separation weights total several GB; a persistent disk is required, never a
+RAM-backed `/tmp`.
 
 ## Usage
 
