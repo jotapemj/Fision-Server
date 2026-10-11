@@ -60,6 +60,8 @@ data/
     users.json      accounts: username + argon2 password hash + token epoch
     secret.key      token-signing key (auto-generated; deleting it logs everyone out)
     queue.json      live queue (queued + running), so jobs survive a restart
+    avatars/        one profile image per account
+    playlists/      <user>.json with the account's playlists; covers in <user>/
 ```
 
 ## Requirements
@@ -196,6 +198,12 @@ All routes except `/health` and `/login` require `Authorization: Bearer <token>`
 | POST   | `/library/{hash}/lyrics`      | Enqueue a Whisper transcription over `vocals.flac`.|
 | GET    | `/library/{hash}/lyrics`      | Serve `lyrics.json` (404 if not generated yet).   |
 | DELETE | `/library/{hash}/lyrics`      | Remove the current `lyrics.json`.                 |
+| GET    | `/playlists`                  | List the caller's playlists (summary).            |
+| POST   | `/playlists`                  | Create a playlist.                                |
+| GET    | `/playlists/{id}`             | One playlist with its ordered song hashes.        |
+| PUT    | `/playlists/{id}`             | Replace title and songs (also used to reorder).   |
+| DELETE | `/playlists/{id}`             | Delete a playlist and its cover.                  |
+| GET/PUT/DELETE | `/playlists/{id}/cover` | Playlist cover, same rules as the avatar.       |
 
 Request validation on `POST /jobs` and `POST /library/{hash}/reprocess`:
 
@@ -277,6 +285,50 @@ GET    /auth/avatar          -> image/*, 404 if none
 PUT    /auth/avatar          -> multipart 'file'; 413 if >FISION_MAX_AVATAR_MB, 400 if not JPEG/PNG/WebP
 DELETE /auth/avatar          -> removes the avatar
 ```
+
+## Playlists
+
+Playlists belong to the account and are stored under `data/playlists/`. Each
+one holds an ordered list of song hashes; the order is the playback order.
+
+```json
+{
+  "id": "a1b2c3d4e5f6",
+  "title": "Friday rehearsal",
+  "count": 2,
+  "has_cover": true,
+  "created_at": "2026-10-11T13:00:00+00:00",
+  "updated_at": "2026-10-11T13:05:00+00:00",
+  "songs": ["<sha256>", "<sha256>"]
+}
+```
+
+`GET /playlists` returns the same objects without `songs`, newest change first.
+`POST` and `PUT` take `{"title": "...", "songs": ["<hash>", ...]}`; `PUT`
+replaces both fields, so reordering is a `PUT` with the new order. When two
+devices edit the same playlist, the last write wins.
+
+Rules (violations return `400` with a stable `code` next to `detail`):
+
+| `code`           | Cause                                                   |
+|------------------|---------------------------------------------------------|
+| `title_length`   | Title empty or longer than 100 characters.              |
+| `song_not_found` | Hash not present in the caller's server library.        |
+| `song_duplicate` | The same song appears twice.                            |
+| `song_limit`     | More than 2000 songs.                                   |
+| `playlist_limit` | The account already has 200 playlists.                  |
+
+```json
+{"detail": "Cancion repetida en la playlist", "code": "song_duplicate"}
+```
+
+`detail` is a human-readable message in Spanish and may change; clients should
+localize from `code` and fall back to `detail` only for unknown codes. Local-only
+songs cannot be added.
+
+Deleting a song with `DELETE /library/{hash}` also removes it from every
+playlist of that account. Covers follow the avatar rules: JPEG, PNG or WebP
+detected by magic bytes, up to `FISION_MAX_AVATAR_MB`, cropped by the client.
 
 ## Lyrics
 
@@ -377,6 +429,8 @@ prefixes are emitted:
 ... AUDIT  password_change.success user=alice
 ... AUDIT  avatar.set user=alice
 ... AUDIT  avatar.delete user=alice
+... AUDIT  playlist.create user=alice id=a1b2c3d4e5f6 songs=12
+... AUDIT  playlist.song_removed user=alice hash=9f86d081884c playlists=2
 ... AUDIT  queue.recover recovered=1 swept=2
 ... AUDIT  job.waiting_gpu job_id=ab12cd34ef56
 ... AUDIT  job.gpu_ready   job_id=ab12cd34ef56

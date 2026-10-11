@@ -15,7 +15,12 @@ API HTTP de Fision. La app movil habla con estos endpoints.
   GET    /library/{hash}            meta de una cancion tuya
   GET    /library/{hash}/zip        descarga tu result.zip vigente
   GET    /library/{hash}/stems/{f}  sirve un fichero de tus stems (portada/audio)
-  DELETE /library/{hash}            borra la entrada
+  DELETE /library/{hash}            borra la entrada (y la quita de tus playlists)
+
+  --- playlists (data/playlists/<user>) ---
+  GET/POST        /playlists              lista / crea
+  GET/PUT/DELETE  /playlists/{id}         lee / sustituye / borra
+  GET/PUT/DELETE  /playlists/{id}/cover   cover (como el avatar)
 
 El usuario sale SIEMPRE del token (Depends(current_user)); nunca de la URL.
 """
@@ -25,12 +30,12 @@ import time
 import tempfile
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from . import (config, library, jobs, users, security, log, avatars, gpu,
-               ratelimit, __version__)
+               ratelimit, playlists, __version__)
 from .auth import current_user, bearer_token
 
 
@@ -135,9 +140,8 @@ def avatar_get(user: str = Depends(current_user)):
     return FileResponse(p, media_type=avatars.media_type(p.suffix))
 
 
-@app.put("/auth/avatar")
-async def avatar_put(file: UploadFile = File(...),
-                     user: str = Depends(current_user)):
+async def _save_image(file: UploadFile):
+    """Sube una imagen a .incoming. Devuelve (ruta, ext real) o 413/400."""
     limit = config.MAX_AVATAR_MB * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(delete=False, dir=config.INCOMING_DIR)
     size = 0
@@ -161,8 +165,14 @@ async def avatar_put(file: UploadFile = File(...),
     if not ext:
         os.remove(tmp.name)
         raise HTTPException(400, "Formato no soportado (usa JPEG/PNG/WebP)")
+    return tmp.name, ext
 
-    avatars.save(user, tmp.name, ext)
+
+@app.put("/auth/avatar")
+async def avatar_put(file: UploadFile = File(...),
+                     user: str = Depends(current_user)):
+    tmp_name, ext = await _save_image(file)
+    avatars.save(user, tmp_name, ext)
     log.event("avatar.set", user=user)
     return {"ok": True}
 
@@ -327,7 +337,103 @@ def lib_delete(h: str, user: str = Depends(current_user)):
     if not lib.exists(h):
         raise HTTPException(404, "No existe")
     lib.delete_entry(h)
+    n = playlists.remove_song(user, h)        # fuera de la nube = fuera de playlists
+    if n:
+        log.event("playlist.song_removed", user=user, hash=h[:12], playlists=n)
     return {"hash": h, "borrado": True}
+
+
+# ------------------------------------------------------------- playlists ----
+class PlaylistIn(BaseModel):
+    title: str
+    songs: list[str] = []
+
+
+def _pl_error(e):
+    # detail como siempre + code estable para traducir en el cliente
+    return JSONResponse(status_code=400, content={"detail": str(e), "code": e.code})
+
+
+def _require_pid(pid):
+    if not playlists.valid_id(pid):
+        raise HTTPException(404, "Playlist no encontrada")
+
+
+@app.get("/playlists")
+def pl_list(user: str = Depends(current_user)):
+    return playlists.list_all(user)
+
+
+@app.post("/playlists")
+def pl_create(body: PlaylistIn, user: str = Depends(current_user)):
+    try:
+        p = playlists.create(user, body.title, body.songs)
+    except playlists.PlaylistError as e:
+        return _pl_error(e)
+    log.event("playlist.create", user=user, id=p["id"], songs=p["count"])
+    return p
+
+
+@app.get("/playlists/{pid}")
+def pl_get(pid: str, user: str = Depends(current_user)):
+    _require_pid(pid)
+    p = playlists.get(user, pid)
+    if not p:
+        raise HTTPException(404, "Playlist no encontrada")
+    return p
+
+
+@app.put("/playlists/{pid}")
+def pl_update(pid: str, body: PlaylistIn, user: str = Depends(current_user)):
+    _require_pid(pid)
+    try:
+        p = playlists.update(user, pid, body.title, body.songs)
+    except playlists.PlaylistError as e:
+        return _pl_error(e)
+    if not p:
+        raise HTTPException(404, "Playlist no encontrada")
+    log.event("playlist.update", user=user, id=pid, songs=p["count"])
+    return p
+
+
+@app.delete("/playlists/{pid}")
+def pl_delete(pid: str, user: str = Depends(current_user)):
+    _require_pid(pid)
+    if not playlists.delete(user, pid):
+        raise HTTPException(404, "Playlist no encontrada")
+    log.event("playlist.delete", user=user, id=pid)
+    return {"ok": True}
+
+
+@app.get("/playlists/{pid}/cover")
+def pl_cover_get(pid: str, user: str = Depends(current_user)):
+    _require_pid(pid)
+    p = playlists.cover_path(user, pid)
+    if not p:
+        raise HTTPException(404, "Sin cover")
+    return FileResponse(p, media_type=avatars.media_type(p.suffix))
+
+
+@app.put("/playlists/{pid}/cover")
+async def pl_cover_put(pid: str, file: UploadFile = File(...),
+                       user: str = Depends(current_user)):
+    _require_pid(pid)
+    tmp_name, ext = await _save_image(file)
+    if not playlists.save_cover(user, pid, tmp_name, ext):
+        os.remove(tmp_name)
+        raise HTTPException(404, "Playlist no encontrada")
+    log.event("playlist.cover_set", user=user, id=pid)
+    return {"ok": True}
+
+
+@app.delete("/playlists/{pid}/cover")
+def pl_cover_delete(pid: str, user: str = Depends(current_user)):
+    _require_pid(pid)
+    if not playlists.get(user, pid):
+        raise HTTPException(404, "Playlist no encontrada")
+    playlists.delete_cover(user, pid)
+    log.event("playlist.cover_delete", user=user, id=pid)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- lyrics ----

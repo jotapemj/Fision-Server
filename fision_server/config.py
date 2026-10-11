@@ -100,6 +100,8 @@ SECRET_FILE = DATA_DIR / "secret.key"    # clave para firmar tokens (auto-genera
 QUEUE_FILE = DATA_DIR / "queue.json"     # cola persistida (sobrevive reinicios)
 AVATARS_DIR = DATA_DIR / "avatars"       # foto de perfil por usuario
 AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+PLAYLISTS_DIR = DATA_DIR / "playlists"   # <user>.json + covers en <user>/
+PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Login: N fallos por (IP, usuario) dentro de la ventana -> 429. 0 = sin limite.
 LOGIN_MAX_FAILS = int(os.environ.get("FISION_LOGIN_MAX_FAILS", "5"))
