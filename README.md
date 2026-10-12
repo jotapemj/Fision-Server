@@ -46,7 +46,22 @@ Three pieces:
   tempo/phase state space. Time signature is auto-detected between 3/4 and
   4/4; tempo range is 55-215 BPM.
 - **Chords** — BTC, a Transformer chord-recognition model, large vocabulary
-  (170 chords), included as a git submodule.
+  (170 chords), included as a git submodule. BTC labels audio frames of about
+  0.09 s without knowledge of the beat grid, which in dense mixes produces
+  chords that flicker within a beat or alternate between a chord and its
+  seventh (`C`, `C7`, `C`). Fision synchronizes the result to the detected
+  beats:
+  1. Frame probabilities are averaged within each beat.
+  2. A Viterbi pass over the beats picks the most likely chord sequence, with
+     a cost for every change. Changes are cheaper on the downbeat and at
+     half-bar, and much cheaper within a chord family (same root and triad:
+     `C`, `C7`, `Cmaj7`, `C6`).
+  3. Consecutive chords of the same family are merged and labeled with the
+     member that accumulates the most probability.
+
+  Chords therefore change only on beats. The strength is set with
+  `FISION_CHORDS_*` variables (see `fision_server/README.md`);
+  `FISION_CHORDS_SMOOTH=0` restores the raw BTC output.
 - **Lyrics (opt-in)** — Whisper (via `faster-whisper`, CTranslate2 engine) on
   the isolated `vocals.flac` stem. Not part of the main pipeline; runs only
   when the client explicitly requests transcription. Segment-level timestamps

@@ -15,6 +15,7 @@ if BTC_REPO_PATH not in sys.path:
 from btc_model import *
 from utils import logger
 from utils.mir_eval_modules import audio_file_to_features, idx2chord, idx2voca_chord
+import chord_smoothing
 
 warnings.filterwarnings('ignore')
 logger.logging_verbosity(0)  # Consola limpia
@@ -72,6 +73,13 @@ def main(file_path, carpeta):
     feature = np.pad(feature, ((0, num_pad), (0, 0)), mode="constant", constant_values=0)
     num_instance = feature.shape[0] // n_timestep
 
+    # Suavizado por beats: solo con vocabulario grande y beats.txt presente
+    # (el pipeline corre beat_this antes que BTC). Si no, camino crudo.
+    smooth_cfg = chord_smoothing.settings()
+    beat_grid = chord_smoothing.read_beats(carpeta) if USE_LARGE_VOCA else None
+    use_smooth = smooth_cfg["enabled"] and beat_grid is not None
+    frame_probs = []
+
     # --- Inferencia (frames -> tramos por cambio de acorde) ---
     start_time = 0.0
     lines = []
@@ -81,6 +89,9 @@ def main(file_path, carpeta):
         for t in range(num_instance):
             self_attn_output, _ = model.self_attn_layers(feature[:, n_timestep * t:n_timestep * (t + 1), :])
             prediction, _ = model.output_layer(self_attn_output)
+            if use_smooth:
+                logits = model.output_layer.output_projection(self_attn_output)
+                frame_probs.append(torch.softmax(logits, -1).squeeze(0).cpu().numpy())
             prediction = prediction.squeeze()
             for i in range(n_timestep):
                 if t == 0 and i == 0:
@@ -95,7 +106,19 @@ def main(file_path, carpeta):
                         lines.append('%.3f %.3f %s\n' % (start_time, time_unit * (n_timestep * t + i), idx_to_chord[prev_chord]))
                     break
 
-    # --- Guardar .lab crudo (start end chord). run_btc lo postprocesa. ---
+    if use_smooth:
+        n_real = num_instance * n_timestep - num_pad     # fuera el padding
+        probs = np.concatenate(frame_probs)[:n_real]
+        segs = chord_smoothing.smooth(
+            probs, time_unit, song_length_second, *beat_grid,
+            change=smooth_cfg["change"], family=smooth_cfg["family"],
+            off_mult=smooth_cfg["off_mult"])
+        lines = ['%.3f %.3f %s\n' % s for s in segs]
+        print(f"Chords smoothed to beats: {len(segs)} segments "
+              f"(change={smooth_cfg['change']} family={smooth_cfg['family']} "
+              f"off_mult={smooth_cfg['off_mult']})")
+
+    # --- Guardar .lab (start end chord). run_btc lo postprocesa. ---
     os.makedirs(carpeta, exist_ok=True)
     stem = os.path.splitext(os.path.basename(file_path))[0]
     lab_path = os.path.join(carpeta, f"{stem}.lab")

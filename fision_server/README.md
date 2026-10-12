@@ -119,6 +119,10 @@ All configuration is read from environment variables.
 | `FISION_SEP_AUTOCAST`    | `1`                      | Enable autocast in audio-separator (`0` to disable). |
 | `FISION_DEMUCS_SHIFTS`   | `4`                      | HTDemucs random shifts (quality, not VRAM).        |
 | `FISION_DEMUCS_OVERLAP`  | `0.5`                    | HTDemucs segment overlap.                          |
+| `FISION_CHORDS_SMOOTH`   | `1`                      | Synchronize chords to beats (`0` = raw BTC output). |
+| `FISION_CHORDS_CHANGE_COST` | `1.0`                 | Cost of a chord change. Higher = fewer, longer chords. |
+| `FISION_CHORDS_FAMILY_COST` | `0.2`                 | Cost of a change within the same root and triad (`C` to `C7`). |
+| `FISION_CHORDS_OFFBEAT_MULT` | `2.0`                | Multiplier on change costs away from the downbeat and half-bar. |
 | `FISION_MODELS_DIR`      | *(unset)*                | Single root for all model weights: `separator/`, `hf/` and `torch/` subdirectories. See *Model weights* in the main README. |
 | `FISION_SEP_MODEL_DIR`   | `$FISION_MODELS_DIR/separator` or `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
@@ -153,6 +157,23 @@ python -m fision_server.useradd    <username>   # create account (prompts for a 
 python -m fision_server.userpasswd <username>   # reset a password (invalidates old sessions)
 python -m fision_server.userdel    <username>   # delete an account (library folder is left intact)
 ```
+
+### Regenerating chords
+
+After changing the chord settings, existing songs can be updated without
+separating them again. The command reruns only the chord model over the stored
+input and the saved beats, rewrites `chords.txt` and `chords_basic.txt`,
+rebuilds `result.zip` and updates `updated_at`. It takes a few seconds per
+song.
+
+```bash
+python -m fision_server.rechords <username> --all
+python -m fision_server.rechords <username> <hash> [<hash> ...]
+```
+
+Run it from the repository root with the same environment as the service
+(`FISION_LIBRARY`, `FISION_MODELS_DIR`, `FISION_CHORDS_*`). Clients holding a
+local copy of a song must download it again to see the new chords.
 
 Client login flow:
 
