@@ -3,7 +3,8 @@
 Self-hosted AI music processing. Feed it a song and Fision separates it into
 stems (vocals, bass, drums, guitar, piano, winds…), detects **beats** and
 **downbeats**, extracts **chords**, and renders **metronomes** and cover art —
-all on your own machine. No cloud, no accounts, your music stays yours.
+all on your own machine. No third-party cloud: accounts, library and models
+live on the host you control.
 
 > **Status:** in active development. Runs, but rough edges remain — see each
 > module's "pending" notes.
@@ -140,21 +141,27 @@ RAM-backed `/tmp`.
 
 ### 1. Server (recommended)
 
-The real way to run Fision: hash-based library, caching, queue, mobile app.
+The real way to run Fision: per-user hash-based library, caching, queue,
+playlists, lyrics and the mobile app.
 
 ```bash
-export FISION_TOKEN="put-a-long-token-here"
-python -m fision_server.run          # listens on 0.0.0.0:8000
+python -m fision_server.useradd alice    # create the first account
+python -m fision_server.run              # listens on 0.0.0.0:8000
 ```
+
+For a permanent installation, `deploy/fision.service.example` is a systemd
+unit template.
 
 Full details, endpoints and how to expose it (Tailscale / Cloudflare Tunnel /
 WireGuard) are in [`fision_server/README.md`](fision_server/README.md).
 
 ### 2. Desktop GUI (local / debug)
 
-A tkinter GUI runs the pipeline directly on one file — **no library, no hashes,
-no cache** (it reprocesses every time). Handy for quick local tests, debugging,
-or trying a single song without setting up the server or the app.
+A tkinter GUI runs the pipeline directly on one file. By default it writes to
+a plain output folder and reprocesses every time; the *save like the server*
+option stores the result in the hash-based library instead (`FISION_LIBRARY`,
+owner `FISION_LOCAL_USER`). Handy for quick local tests, debugging, or trying a
+single song without setting up the server or the app.
 
 ```bash
 python headless_fisionAI_gui.py
@@ -165,7 +172,8 @@ python headless_fisionAI_gui.py
 ### 3. Command line
 
 ```bash
-python headless_fision_CLI.py <input_audio> <output_dir> [config.json]
+python headless_fision_CLI.py <input_audio> <output_dir> [config.json] [--device cpu|cuda]
+python headless_fision_CLI.py <input_audio> [config.json] --save-server   # into the library
 ```
 
 ### 4. Lyrics (Whisper, standalone)

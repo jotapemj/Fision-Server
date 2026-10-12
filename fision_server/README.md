@@ -15,8 +15,9 @@ Fision Server is the backend of Fision, a self-hosted alternative to cloud-based
 stem-separation services. It receives audio from a client, runs the Fision
 pipeline (stem separation, beat/downbeat and chord detection, cover art and
 metronomes) and stores the results in a **per-user library** on the host, so they
-can be downloaded again without reprocessing. All data stays on the machine that
-runs the server.
+can be downloaded again without reprocessing. On top of the library it offers
+opt-in lyrics transcription, per-user playlists and profile avatars. All data
+stays on the machine that runs the server.
 
 ## How it works
 
@@ -37,6 +38,9 @@ runs the server.
 - **Atomic results.** Processing happens in `stems_tmp/`; the swap into the live
   `stems/` and `result.zip` occurs only on success. A failed or cancelled
   reprocess never destroys the previous result.
+- **Bounded jobs.** Each job runs in its own process group. Cancelling a job or
+  exceeding `FISION_JOB_TIMEOUT_SEC` / `FISION_LYRICS_TIMEOUT_SEC` stops the
+  whole group, including the separator, so no process keeps holding the GPU.
 - **Crash-safe queue.** The live queue is persisted to `queue.json`. On startup
   the server re-enqueues interrupted jobs (discarding their partial `stems_tmp/`),
   skips jobs that had already completed, and reconciles orphaned in-progress
@@ -263,7 +267,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.4.0"
+  "version": "1.9.0"
 }
 ```
 
