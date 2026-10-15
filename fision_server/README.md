@@ -181,10 +181,19 @@ local copy of a song must download it again to see the new chords.
 
 Client login flow:
 
-1. `POST /login` with `{username, password}` returns `{token, user}`.
+1. `POST /login` with `{username, password}` returns
+   `{token, user, expires_at}` (`expires_at` is ISO 8601, UTC).
 2. Every other request sends `Authorization: Bearer <token>`.
-3. `POST /auth/change-password` returns a fresh token (changing the password
+3. `POST /auth/refresh` with a valid token returns a new
+   `{token, user, expires_at}` with a full `FISION_TOKEN_TTL_HOURS` lifetime.
+   Clients should call it when the app opens (sliding session): an account
+   used at least once per TTL never has to log in again.
+4. `POST /auth/change-password` returns a fresh token (changing the password
    invalidates the previous one via a per-account token epoch).
+5. Any `401` on an authenticated route means the token is no longer valid
+   (expired, revoked or account deleted). Clients should discard the token and
+   show the login screen; retrying with the same token will keep failing.
+   A `401` on `/login` means wrong credentials.
 
 Usernames are slugs matching `[a-z0-9_]` (2-32 characters); the username also
 serves as the library folder name. Passwords are hashed with **argon2** and are
@@ -204,6 +213,7 @@ All routes except `/health` and `/login` require `Authorization: Bearer <token>`
 | Method | Path                          | Description                                     |
 |--------|-------------------------------|-------------------------------------------------|
 | POST   | `/login`                      | Exchange username + password for a token.       |
+| POST   | `/auth/refresh`               | Exchange a valid token for a new one (full TTL).|
 | POST   | `/auth/change-password`       | Change the password; returns a fresh token.     |
 | GET    | `/auth/avatar`                | Serve the caller's avatar image. 404 if unset.  |
 | PUT    | `/auth/avatar`                | Upload avatar (multipart `file`, JPEG/PNG/WebP).|
@@ -267,7 +277,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.9.0"
+  "version": "1.10.0"
 }
 ```
 
@@ -451,6 +461,8 @@ prefixes are emitted:
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials
 ... AUDIT  login.blocked user=alice ip=100.64.0.7
+... AUDIT  token.refresh user=alice
+... AUDIT  auth.reject reason=expired user=alice
 ... AUDIT  password_change.success user=alice
 ... AUDIT  avatar.set user=alice
 ... AUDIT  avatar.delete user=alice
@@ -463,6 +475,11 @@ prefixes are emitted:
 ... AUDIT  job.gpu_fallback job_id=ab12cd34ef56 reason=no_gpu
 ... ACCESS user=alice POST /jobs 200 143ms
 ```
+
+`auth.reject` records why an authenticated request got `401`: `missing` (no
+token), `expired`, `revoked` (password changed), `unknown_user` (account
+deleted) or `bad_token` (bad signature or malformed). For `expired` the user is
+still taken from the token, since its signature is valid.
 
 To follow account events on a running service:
 

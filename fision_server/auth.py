@@ -13,7 +13,7 @@ Uso en endpoints:
 """
 from fastapi import Header, HTTPException, Depends
 
-from . import security
+from . import security, log
 
 
 def bearer_token(authorization: str = Header(default="")):
@@ -27,7 +27,12 @@ def bearer_token(authorization: str = Header(default="")):
 async def current_user(authorization: str = Header(default="")) -> str:
     """Devuelve el username autenticado. 401 si el token falta o no vale."""
     token = bearer_token(authorization)
-    user = security.verify(token) if token else None
-    if not user:
+    if not token:
+        log.event("auth.reject", reason="missing", user="-")
+        raise HTTPException(status_code=401, detail="No autenticado")
+    user, reason = security.check(token)
+    if reason:
+        # el motivo diagnostica sin adivinar (caducado, revocado...)
+        log.event("auth.reject", reason=reason, user=user or "-")
         raise HTTPException(status_code=401, detail="No autenticado")
     return user

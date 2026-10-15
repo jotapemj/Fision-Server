@@ -3,6 +3,7 @@ API HTTP de Fision. La app movil habla con estos endpoints.
 
   --- auth ---
   POST   /login                     user+password -> devuelve token (429 si abusa)
+  POST   /auth/refresh              token vigente -> token nuevo (sesion deslizante)
   POST   /auth/change-password      cambia tu password (token vigente)
 
   --- trabajo (todo bajo TU biblioteca: library/<user>/) ---
@@ -104,12 +105,22 @@ def login(body: LoginIn, request: Request):
     # verify() siempre: con usuario inexistente gasta lo mismo (hash señuelo)
     if users.verify(name, body.password):
         ratelimit.clear(ip, name)
-        token = security.issue(name)
+        token, exp = security.issue(name)
         log.event("login.success", user=name)
-        return {"token": token, "user": name}
+        return {"token": token, "user": name, "expires_at": exp.isoformat()}
     ratelimit.fail(ip, name)
     log.event("login.fail", user=name or "-", reason="bad_credentials")
     raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+
+
+@app.post("/auth/refresh")
+def refresh(user: str = Depends(current_user)):
+    """Token vigente -> uno nuevo con TTL completo. El cliente lo llama al
+    abrir la app: si la usa al menos una vez por TTL, nunca caduca. Password
+    cambiada o usuario borrado siguen matando el token (current_user)."""
+    token, exp = security.issue(user)
+    log.event("token.refresh", user=user)
+    return {"token": token, "user": user, "expires_at": exp.isoformat()}
 
 
 class ChangePwIn(BaseModel):
@@ -126,9 +137,9 @@ def change_password(body: ChangePwIn, user: str = Depends(current_user)):
         users.set_password(user, body.new_password)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    token = security.issue(user)                  # el cambio mato el token viejo
+    token, exp = security.issue(user)             # el cambio mato el token viejo
     log.event("password_change.success", user=user)
-    return {"ok": True, "token": token}
+    return {"ok": True, "token": token, "expires_at": exp.isoformat()}
 
 
 # ---------------------------------------------------------------- avatar ----
