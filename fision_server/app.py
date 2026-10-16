@@ -23,6 +23,11 @@ API HTTP de Fision. La app movil habla con estos endpoints.
   GET/PUT/DELETE  /playlists/{id}         lee / sustituye / borra
   GET/PUT/DELETE  /playlists/{id}/cover   cover (como el avatar)
 
+  --- admin (admin.py; solo redes ADMIN_ALLOW + role=admin) ---
+  GET  /admin                    pagina del panel
+  ...  /admin/api/...            usuarios, bibliotecas (metadatos), trabajos,
+                                 auditoria, configuracion (solo lectura)
+
 El usuario sale SIEMPRE del token (Depends(current_user)); nunca de la URL.
 """
 import os
@@ -36,7 +41,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from . import (config, library, jobs, users, security, log, avatars, gpu,
-               ratelimit, playlists, __version__)
+               ratelimit, playlists, admin, __version__)
 from .auth import current_user, bearer_token
 
 
@@ -47,12 +52,17 @@ async def lifespan(app):
     info = gpu.info()
     log.event("server.start", gpu=info["gpu"], gpu_name=info["gpu_name"],
               vram_total_mb=info["vram_total_mb"])
+    if not users.admins():
+        # sin admin el panel /admin no tiene dueño: avisar como crearlo
+        log.event("admin.missing",
+                  hint="python -m fision_server.usermod <user> --admin")
     jobs.recover()                    # recupera cola y limpia huerfanas tras caida
     jobs.start_worker()
     yield
 
 
 app = FastAPI(title="Fision AI Server", lifespan=lifespan)
+app.include_router(admin.router)          # /admin (pagina) + /admin/api/...
 
 
 # --------------------------------------------------------- access logging ----

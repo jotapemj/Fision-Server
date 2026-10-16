@@ -84,7 +84,7 @@ fastapi  uvicorn  python-multipart  mutagen  argon2-cffi  PyJWT
 export FISION_LIBRARY="/path/to/library"     # result storage (default: ./library)
 export FISION_DATA="/path/to/data"           # accounts + keys (default: ./data)
 
-python -m fision_server.useradd alice        # create the first account
+python -m fision_server.useradd alice        # first account (becomes administrator)
 python -m fision_server.run                  # start the server
 # or: uvicorn fision_server.app:app --host 0.0.0.0 --port 8000
 ```
@@ -103,6 +103,7 @@ All configuration is read from environment variables.
 | `FISION_LOGIN_MAX_FAILS` | `5`                      | Failed logins per IP and username before `429`. `0` disables the limit. |
 | `FISION_LOGIN_WINDOW_SEC` | `300`                   | Window for counting failed logins.                 |
 | `FISION_LOG_LEVEL`       | `INFO`                   | Log verbosity.                                     |
+| `FISION_ADMIN_ALLOW`     | loopback, private ranges, Tailscale | Comma-separated networks allowed to reach `/admin`. Other clients get `403` even with an administrator token. |
 | `FISION_HOST`            | `0.0.0.0`                | Bind address.                                      |
 | `FISION_PORT`            | `8000`                   | Bind port.                                         |
 | `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size.                               |
@@ -132,6 +133,23 @@ All configuration is read from environment variables.
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 | `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
 
+### Changing the configuration
+
+The server reads these variables once, at startup. They are shown read-only
+in the admin panel; to change one, set it where the service is defined and
+restart the server:
+
+- **systemd:** add or edit an `Environment=` line in the unit (or a drop-in
+  created with `systemctl edit fision`), then run `systemctl daemon-reload`
+  and `systemctl restart fision`. See `deploy/fision.service.example`.
+- **Docker / Compose:** edit the `environment:` section (or the `.env` file it
+  references) and recreate the container.
+- **Manual start:** export the variable in the shell before
+  `python -m fision_server.run`.
+
+Path variables take effect for new jobs only after the restart; files already
+in the old locations are not moved automatically.
+
 ### Scaling VRAM usage
 
 The defaults are conservative (Pascal / GTX 1050). On modern cards with
@@ -157,10 +175,54 @@ There is **no public registration**. Accounts are created from the host shell,
 and credentials are distributed out of band.
 
 ```bash
-python -m fision_server.useradd    <username>   # create account (prompts for a password)
+python -m fision_server.useradd    <username> [--admin]  # create account (prompts for a password)
+python -m fision_server.usermod    <username> --admin|--no-admin  # grant or remove the admin role
 python -m fision_server.userpasswd <username>   # reset a password (invalidates old sessions)
 python -m fision_server.userdel    <username>   # delete an account (library folder is left intact)
 ```
+
+The first account created on a fresh installation is an administrator even
+without `--admin`, so the admin panel always has an owner. The last
+administrator cannot be deleted or demoted. If no administrator exists at
+startup, the server logs `AUDIT admin.missing` with the command to fix it.
+
+### Admin panel
+
+Administrators can manage the server from a browser at `http://<host>:8000/admin`,
+signing in with their usual credentials. The panel covers:
+
+- **Overview:** version, uptime, GPU and free VRAM (with a warning below
+  `FISION_GPU_MIN_VRAM_MB`), library and model disk usage, accounts and queue.
+- **Users:** create accounts (the generated password is shown once), reset a
+  password, close all sessions of an account, grant or remove the admin role,
+  and delete accounts. Deleting can optionally remove the user's library,
+  playlists and avatar from disk.
+- **User libraries:** metadata only (title, artist, state, size, date). Each
+  song opens a technical summary: duration, original format, separated
+  tracks, whether lyrics, chords, metronome and cover were generated, lyrics
+  language, tempo and processing device. Audio, covers and lyrics are not
+  reachable from the panel.
+- **Jobs:** every queued and running job across users, with cancellation.
+- **Activity:** audit events since the last start. The full history stays in
+  the system log.
+- **Settings:** effective configuration, read-only. Values come from the
+  environment; secrets are never shown. Changing them means editing the
+  service definition and restarting.
+
+Access needs both an administrator account and a client address inside
+`FISION_ADMIN_ALLOW`. The default covers loopback, private networks and
+Tailscale, so the panel is not reachable from the internet even if the API is.
+Behind a reverse proxy on the same host, either forward the client address
+(uvicorn trusts `X-Forwarded-For` from `127.0.0.1`) or block `/admin` at the
+proxy; otherwise every request appears to come from loopback.
+
+The panel is available in English, Spanish, Portuguese, Italian, French,
+German, Russian, Chinese, Catalan and Ukrainian. It follows the system language and
+falls back to English; a different language can be chosen from the account
+menu or the sign-in screen and is remembered by the browser. Chinese text uses
+the system's CJK font (Noto Sans has no CJK glyphs). It ships with its own copy of Noto Sans (SIL Open Font License, see
+`fision_server/admin_ui/static/NotoSans-OFL.txt`) and inline icons, so it
+works without internet access.
 
 ### Regenerating chords
 
@@ -277,7 +339,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.10.0"
+  "version": "1.11.0"
 }
 ```
 
@@ -463,6 +525,10 @@ prefixes are emitted:
 ... AUDIT  login.blocked user=alice ip=100.64.0.7
 ... AUDIT  token.refresh user=alice
 ... AUDIT  auth.reject reason=expired user=alice
+... AUDIT  user.role user=alice role=admin by=cli
+... AUDIT  user.delete user=bob by=alice purge=True
+... AUDIT  sessions.revoke user=bob by=alice
+... AUDIT  admin.reject reason=network ip=203.0.113.9
 ... AUDIT  password_change.success user=alice
 ... AUDIT  avatar.set user=alice
 ... AUDIT  avatar.delete user=alice

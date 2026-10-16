@@ -5,6 +5,7 @@ Store de usuarios en disco (users.json). Un usuario:
       "username": "valeria",
       "pwd_hash": "$argon2id$...",   # NUNCA la password en claro
       "token_epoch": 1,              # sube al cambiar pass -> mata tokens viejos
+      "role": "admin",               # opcional; sin campo = usuario normal
       "created_at": "...",
       "updated_at": "..."
     }
@@ -77,8 +78,44 @@ def token_epoch(name):
     return u.get("token_epoch", 1) if u else None
 
 
+def is_admin(name):
+    u = _load().get(name)
+    return bool(u) and u.get("role") == "admin"
+
+
+def admins():
+    return sorted(n for n, u in _load().items() if u.get("role") == "admin")
+
+
+def set_admin(name, flag):
+    """Da o quita el rol admin. Nunca deja el servidor sin admin."""
+    data = _load()
+    u = data.get(name)
+    if not u:
+        raise ValueError(f"el usuario '{name}' no existe")
+    if not flag and u.get("role") == "admin" and len(admins()) <= 1:
+        raise ValueError("no se puede quitar el ultimo administrador")
+    if flag:
+        u["role"] = "admin"
+    else:
+        u.pop("role", None)
+    u["updated_at"] = _now()
+    _save(data)
+
+
+def revoke_sessions(name):
+    """Sube token_epoch sin tocar la password: cierra todas sus sesiones."""
+    data = _load()
+    u = data.get(name)
+    if not u:
+        raise ValueError(f"el usuario '{name}' no existe")
+    u["token_epoch"] = u.get("token_epoch", 1) + 1
+    u["updated_at"] = _now()
+    _save(data)
+
+
 # ----------------------------------------------------------------- altas ----
-def create(name, password):
+def create(name, password, admin=False):
     """Alta de usuario. Falla si el nombre no es valido o ya existe."""
     if not valid_username(name):
         raise ValueError("username invalido (usa [a-z0-9_], 2-32 chars)")
@@ -95,6 +132,8 @@ def create(name, password):
         "created_at": now,
         "updated_at": now,
     }
+    if admin:
+        data[name]["role"] = "admin"
     _save(data)
 
 
@@ -102,6 +141,8 @@ def delete(name):
     data = _load()
     if name not in data:
         raise ValueError(f"el usuario '{name}' no existe")
+    if data[name].get("role") == "admin" and len(admins()) <= 1:
+        raise ValueError("no se puede borrar el ultimo administrador")
     del data[name]
     _save(data)
 

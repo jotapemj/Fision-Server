@@ -113,6 +113,12 @@ TOKEN_TTL_HOURS = int(os.environ.get("FISION_TOKEN_TTL_HOURS", "720"))
 # Nivel de log del servidor.
 LOG_LEVEL = os.environ.get("FISION_LOG_LEVEL", "INFO").upper()
 
+# Panel admin (/admin): solo responde a estas redes, aunque el token sea de
+# admin. Por defecto localhost, redes privadas y Tailscale (CGNAT + ULA).
+ADMIN_ALLOW_DEFAULT = ("127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,"
+                       "192.168.0.0/16,100.64.0.0/10,fd7a:115c:a1e0::/48")
+ADMIN_ALLOW = os.environ.get("FISION_ADMIN_ALLOW", ADMIN_ALLOW_DEFAULT).strip()
+
 
 def _load_secret():
     """Clave para firmar tokens. Prioridad: env -> fichero -> generar y guardar.

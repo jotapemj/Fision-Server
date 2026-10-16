@@ -145,9 +145,13 @@ The real way to run Fision: per-user hash-based library, caching, queue,
 playlists, lyrics and the mobile app.
 
 ```bash
-python -m fision_server.useradd alice    # create the first account
+python -m fision_server.useradd alice    # first account, becomes administrator
 python -m fision_server.run              # listens on 0.0.0.0:8000
 ```
+
+Administrators manage accounts, jobs and the server status from a browser at
+`http://<host>:8000/admin`, reachable only from the local network and
+Tailscale by default.
 
 For a permanent installation, `deploy/fision.service.example` is a systemd
 unit template.

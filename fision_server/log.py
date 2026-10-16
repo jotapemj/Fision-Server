@@ -15,10 +15,18 @@ Ver solo eventos de usuario en el servicio:
 """
 import sys
 import logging
+import threading
+from collections import deque
+from datetime import datetime, timezone
 
 from . import config
 
 _configured = False
+
+# Ultimos eventos AUDIT en memoria, para el panel admin (journald no es
+# legible desde el proceso). Se pierden al reiniciar; journald manda.
+_recent = deque(maxlen=300)
+_recent_lock = threading.Lock()
 
 
 def setup():
@@ -53,6 +61,19 @@ def event(name, user=None, **fields):
     setup()
     tail = _kv({"user": user, **fields})
     audit.info("AUDIT %s %s", name, tail)
+    with _recent_lock:
+        _recent.append({
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "event": name, "user": user or "",
+            "fields": {k: str(v) for k, v in fields.items() if v is not None and v != ""},
+        })
+
+
+def recent(limit=100):
+    """Eventos AUDIT desde el arranque, mas nuevos primero."""
+    with _recent_lock:
+        items = list(_recent)
+    return items[::-1][:max(1, int(limit))]
 
 
 def access_line(method, path, status, user, ms):

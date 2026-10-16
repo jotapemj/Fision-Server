@@ -186,6 +186,30 @@ def list_active(user):
         return out
 
 
+def list_all_active():
+    """Trabajos VIVOS de todos los usuarios (panel admin), en orden de la cola."""
+    with _cond:
+        out = []
+        cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
+        if cur and cur["estado"] in ("running", "waiting_gpu"):
+            out.append({"job_id": cur["job_id"], "user": cur["user"],
+                        "hash": cur["hash"], "nombre": cur["nombre"],
+                        "kind": cur.get("kind", "separation"),
+                        "estado": cur["estado"], "posicion": 0,
+                        "creado": cur.get("creado", "")})
+        pos = 0
+        for pid in _pending:
+            j = _jobs.get(pid)
+            if j and j["estado"] == "queued":
+                pos += 1
+                out.append({"job_id": j["job_id"], "user": j["user"],
+                            "hash": j["hash"], "nombre": j["nombre"],
+                            "kind": j.get("kind", "separation"),
+                            "estado": "queued", "posicion": pos,
+                            "creado": j.get("creado", "")})
+        return out
+
+
 # --------------------------------------------------------------- cancelar ----
 def cancel_job(jid, user=None):
     revert = None

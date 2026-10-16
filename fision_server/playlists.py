@@ -184,6 +184,20 @@ def delete(user, pid):
     return True
 
 
+def count(user):
+    return len(_load(user))
+
+
+def purge(user):
+    """Borra TODAS las playlists y covers del usuario (baja con borrado total)."""
+    with _lock:
+        try:
+            os.remove(_file(user))
+        except FileNotFoundError:
+            pass
+        shutil.rmtree(_cover_dir(user), ignore_errors=True)
+
+
 def remove_song(user, h):
     """Quita una cancion de todas las playlists del usuario. Devuelve cuantas."""
     with _lock:

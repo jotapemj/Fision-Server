@@ -26,8 +26,12 @@ def main():
         print("cancelado.")
         return
 
-    users.delete(name)
-    log.event("user.delete", user=name)
+    try:
+        users.delete(name)
+    except ValueError as e:                     # p.ej. ultimo administrador
+        print(f"error: {e}")
+        sys.exit(1)
+    log.event("user.delete", user=name, by="cli")
     print(f"OK: usuario '{name}' borrado. Recuerda: library/{name}/ sigue en disco.")
 
 
