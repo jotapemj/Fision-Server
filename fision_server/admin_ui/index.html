@@ -39,7 +39,9 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
-html { touch-action: manipulation; }  /* sin zoom por doble toque */
+/* sin zoom: pan-x pan-y excluye pellizco y doble toque, y Chrome lo
+   respeta aunque ignore user-scalable=no (accesibilidad "forzar zoom") */
+html, body { touch-action: pan-x pan-y; }
 body { font-family: var(--font); font-size: 14px; -webkit-font-smoothing: antialiased; }
 button, input { font: inherit; color: inherit; }
 svg.i { width: 24px; height: 24px; fill: currentColor; flex: none; }
@@ -698,6 +700,10 @@ async function viewConfig() {
     <p><a class="link" href="${DOCS}" target="_blank" rel="noopener">${esc(T.moreInfo)}${ico("open")}</a></p>
     <div class="acts"><button class="btn primary tap" data-close>${esc(T.accept)}</button></div>`));
 }
+
+// Sin zoom en movil: respaldo para navegadores que ignoran viewport y touch-action
+document.addEventListener("touchmove", e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+["gesturestart", "gesturechange"].forEach(t => document.addEventListener(t, e => e.preventDefault()));
 
 // ------------------------------------------------------------------ diálogos ----
 let lastFocus = null;

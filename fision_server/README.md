@@ -339,7 +339,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.0"
+  "version": "1.11.1"
 }
 ```
 
