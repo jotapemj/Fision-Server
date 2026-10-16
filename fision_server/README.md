@@ -339,7 +339,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.1"
+  "version": "1.11.2"
 }
 ```
 
@@ -487,6 +487,25 @@ Each segment carries both a phrase-level `start`/`end`/`text` (for line-by-line
 karaoke rendering) and a `words` array with per-word timestamps (for optional
 word-by-word highlighting). Long Whisper segments are split at silences
 between consecutive words (default 2 s) so each phrase stays a usable size.
+Whisper writes each sung line with an initial capital and often without
+punctuation; when lines are sung back to back there is no silence between
+them, so a phrase is also split before a capitalised word whose preceding
+word is a held note (at least 0.35 s). Proper nouns usually follow a short
+word ("de", "in", "my") and stay on the same line. Known subtitle
+boilerplate that Whisper produces over silence ("Amara.org", "Thanks for
+watching", "Suscríbete") is dropped, and so are zero-length repetitions of
+the previous word, which Whisper emits when it falls into a repetition loop.
+When the first word of a line was aligned to the end of the previous line
+(a capitalised word at the end of a line followed, after a pause, by a line
+starting in lowercase), it is moved to the start of the next line and the
+preceding word keeps the held note. Lines starting with a hyphenated
+continuation ("-o-us") are joined to the previous one. Phrases longer than
+8 s are split again at the most likely line boundary (punctuation or a
+capitalised word), never inside a hyphenated word and never leaving fewer
+than three words on either side. Words that Whisper writes in full capitals (shouted passages)
+are lowercased, keeping the capital at the start of the line. Whisper runs
+without an `initial_prompt`: a context prompt was being transcribed as lyrics
+in passages without voice.
 Word items are always present, but the array may be empty in the rare case
 where Whisper does not emit word alignments for a phrase — clients should
 gracefully fall back to the segment-level timing in that case.

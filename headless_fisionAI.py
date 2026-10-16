@@ -307,33 +307,6 @@ def run_beats(input_file: str, output_dir: str):
 
 
 # ---------- LYRICS ----------
-# Pistas de contexto para Whisper. Se pasan como `initial_prompt` cuando el
-# usuario fija idioma. Objetivo: anclar el decoder al registro "letra de
-# cancion" y reducir boilerplate de YouTube ("Suscribete", "Amara.org",
-# "Subtitulos por..."). No van con language=None (auto) para no sesgar la
-# deteccion.
-_LYRICS_INITIAL_PROMPTS = {
-    "es": "Letra de cancion en espanol.",
-    "en": "Song lyrics in English.",
-    "fr": "Paroles de chanson en francais.",
-    "pt": "Letra de musica em portugues.",
-    "it": "Testo di canzone in italiano.",
-    "de": "Liedtext auf Deutsch.",
-    "ca": "Lletra de canco en catala.",
-    "gl": "Letra de cancion en galego.",
-    "eu": "Kantuko hitzak euskaraz.",
-    "nl": "Nederlands liedtekst.",
-    "pl": "Tekst piosenki po polsku.",
-    "sv": "Svenska sangtexter.",
-    "tr": "Turkce sarki sozleri.",
-    "ru": "Tekst pesni na russkom.",
-    "ja": "Nihongo no kashi.",
-    "ko": "Hangugeo norae gasa.",
-    "zh": "Zhongwen gequ geci.",
-    "ar": "Kalimat ughniya bilarabiya.",
-    "hi": "Hindi gaane ke bol.",
-}
-
 # Umbral (en segundos) de silencio entre palabras para partir un segmento de
 # Whisper en sub-frases. Con word_timestamps=True el decoder tiende a agrupar
 # multiples frases en un unico segment de decenas de segundos; el split por
@@ -349,12 +322,14 @@ _LYRICS_MERGE_MIN_WORDS = 2
 _LYRICS_MERGE_GAP_S = 6.5
 
 # Cap duro de duracion por sub-segment. Whisper a veces resuelve un verso
-# entero de 10-11 s en un unico segment denso (poco silencio entre palabras
-# porque el cantante encadena las frases). Para karaoke por linea eso no
-# vale. Si un sub-segment excede este limite, se parte por el mayor gap
-# interno entre palabras (recursivo hasta que todos caben o no hay mas
-# donde partir).
+# entero de 10-11 s en un unico segment denso. Para karaoke por linea eso no
+# vale: si un sub-segment excede este limite se parte en la mejor frontera
+# de frase (ver _split_score), recursivo hasta que todo cabe.
 _LYRICS_MAX_SEG_S = 8.0
+# Palabras minimas a cada lado de un corte: nunca deja lineas de 1 palabra.
+_LYRICS_SPLIT_MIN_WORDS = 3
+# Pronombres ingleses siempre en mayuscula: no marcan inicio de verso.
+_LYRICS_ALWAYS_UPPER = {"i", "i'm", "i'll", "i've", "i'd"}
 
 
 def _word_to_dict(w):
@@ -378,40 +353,192 @@ def _sub_seg_from_words(words):
     }
 
 
-def _split_long_sub(sub, max_s=_LYRICS_MAX_SEG_S):
-    """Parte un sub-segment demasiado largo por el mayor gap interno entre
-    palabras. Recursivo. Si no hay al menos 2 palabras o el corte no
-    reduciria (segment ya minimo), devuelve el sub tal cual."""
-    duration = float(sub["end"]) - float(sub["start"])
+def _join_words(ws):
+    """Une palabras ya serializadas. Las que empiezan por - o ' son
+    continuacion de la anterior en Whisper ("Uh" "-huh", "y" "'all")."""
+    text = ""
+    for w in ws:
+        t = w["text"]
+        text += t if not text or t[:1] in "-'’" else " " + t
+    return text.strip()
+
+
+def _split_score(words, i, t0, t1):
+    """Puntua cortar antes de words[i]. Whisper marca el inicio de verso con
+    mayuscula y el final con coma/punto; el gap ayuda poco (al encadenar
+    frases las palabras van pegadas, gap 0). Desempate: corte equilibrado."""
+    prev, cur = words[i - 1]["text"], words[i]["text"]
+    mid = abs(float(words[i]["start"]) - (t0 + t1) / 2) / max(t1 - t0, 1e-6)
+    if cur[:1] == "-":                        # "Ho" "-o-us": misma palabra
+        return -10.0 - mid
+    score = 0.0
+    if prev[-1:] in ".,;:!?":
+        score += 3
+    if cur[:1].isupper() and cur.lower().strip(".,;:!?") not in _LYRICS_ALWAYS_UPPER:
+        score += 2
+    score += min(max(float(words[i]["start"]) - float(words[i - 1]["end"]), 0.0), 1.0)
+    return score - mid                        # mid en [0, 0.5]
+
+
+def _split_long_sub(sub, max_s=_LYRICS_MAX_SEG_S, min_words=_LYRICS_SPLIT_MIN_WORDS):
+    """Parte un sub-segment demasiado largo en la mejor frontera de frase.
+    Recursivo. Si no hay corte que deje min_words a cada lado, lo deja tal
+    cual (linea larga mejor que palabras sueltas)."""
+    t0, t1 = float(sub["start"]), float(sub["end"])
     words = sub.get("words") or []
-    if duration <= max_s or len(words) < 2:
+    if t1 - t0 <= max_s or len(words) < 2 * min_words:
         return [sub]
+    best_i = max(range(min_words, len(words) - min_words + 1),
+                 key=lambda i: _split_score(words, i, t0, t1))
+    if _split_score(words, best_i, t0, t1) <= -10 and t1 - t0 <= 2 * max_s:
+        return [sub]                          # solo cortes dentro de palabra
+    parts = []
+    for ws in (words[:best_i], words[best_i:]):
+        parts.append({
+            "start": ws[0]["start"],
+            "end": ws[-1]["end"],
+            "text": _join_words(ws),
+            "words": ws,
+        })
+    return _split_long_sub(parts[0], max_s, min_words) + _split_long_sub(parts[1], max_s, min_words)
 
-    best_i = -1
-    best_gap = -1.0
-    for i in range(1, len(words)):
-        gap = float(words[i]["start"]) - float(words[i - 1]["end"])
-        if gap > best_gap:
-            best_gap = gap
-            best_i = i
-    if best_i < 1:
+
+# Salto de verso. Whisper escribe cada verso con mayuscula inicial y sin
+# puntuacion (formato de letras), pero si el cantante encadena no hay
+# silencio y dos versos caen en la misma linea. Se parte en la mayuscula
+# solo si la palabra anterior es nota sostenida: los versos acaban en nota
+# larga (0.4-1.6 s medido) y los nombres propios van tras "de", "en", "mi",
+# "hasta" (~0.2 s). Asi "de Bahrein" o "el Nueva York" no se parten.
+_LYRICS_VERSE_HOLD_S = 0.35
+
+
+def _is_verse_start(prev, cur):
+    t = cur["text"]
+    if t[:1] == "-":                          # "-Ra": sigue la palabra previa
+        return False
+    k = next((n for n, c in enumerate(t) if c.isalpha()), None)
+    if k is None or not t[k].isupper():
+        return False
+    if t.lower().strip(".,;:!?\"'") in _LYRICS_ALWAYS_UPPER:
+        return False
+    return (prev["text"][-1:] in ".!?"
+            or float(prev["end"]) - float(prev["start"]) >= _LYRICS_VERSE_HOLD_S)
+
+
+def _split_verses(sub, min_words=_LYRICS_SPLIT_MIN_WORDS):
+    """Parte un sub-segment en cada inicio de verso, dejando al menos
+    min_words palabras por pieza."""
+    words = sub.get("words") or []
+    cuts, last = [], 0
+    for i in range(min_words, len(words) - min_words + 1):
+        if i - last >= min_words and _is_verse_start(words[i - 1], words[i]):
+            cuts.append(i)
+            last = i
+    if not cuts:
         return [sub]
+    out = []
+    for a, b in zip([0] + cuts, cuts + [len(words)]):
+        ws = words[a:b]
+        out.append({"start": ws[0]["start"], "end": ws[-1]["end"],
+                    "text": _join_words(ws), "words": ws})
+    return out
 
-    left_ws = words[:best_i]
-    right_ws = words[best_i:]
-    left = {
-        "start": left_ws[0]["start"],
-        "end": left_ws[-1]["end"],
-        "text": " ".join(w["text"] for w in left_ws).strip(),
-        "words": left_ws,
-    }
-    right = {
-        "start": right_ws[0]["start"],
-        "end": right_ws[-1]["end"],
-        "text": " ".join(w["text"] for w in right_ws).strip(),
-        "words": right_ws,
-    }
-    return _split_long_sub(left, max_s) + _split_long_sub(right, max_s)
+
+# Coletillas de subtitulos de YouTube que Whisper alucina en tramos sin voz.
+# Patrones explicitos: nada de umbrales que puedan comerse letra real
+# ("te amara" es letra; "Amara.org" no).
+_LYRICS_BOILERPLATE = re.compile(
+    r"amara\s*\.\s*org|^\W*subt[ií]tul(os|ado)\b.*\bpor\b|"
+    r"^\W*subtitles\s+by\b|\bsuscr[ií]bete\b|\bthanks\s+for\s+watching\b|"
+    r"\bgracias\s+por\s+ver\b", re.IGNORECASE)
+
+
+def _is_boilerplate(sub):
+    return bool(_LYRICS_BOILERPLATE.search(sub["text"]))
+
+
+def _sub_from_dicts(ws):
+    return {"start": ws[0]["start"], "end": ws[-1]["end"],
+            "text": _join_words(ws), "words": ws}
+
+
+# Bucles de Whisper ("Judas" x39, "ya" x66): las repeticiones sobrantes salen
+# con duracion ~0 (el alineador no les encuentra sitio). Se tira la palabra
+# de duracion < _LOOP_DUR_S que repite la anterior; las cantadas de verdad
+# tienen duracion y se quedan.
+_LYRICS_LOOP_DUR_S = 0.02
+
+
+def _word_key(text):
+    return re.sub(r"\W", "", text.lower())
+
+
+def _drop_loop_words(subs):
+    out, prev = [], None
+    for sub in subs:
+        ws = sub.get("words") or []
+        if not ws:
+            out.append(sub)
+            continue
+        kept = []
+        for w in ws:
+            k = _word_key(w["text"])
+            if k == prev and float(w["end"]) - float(w["start"]) < _LYRICS_LOOP_DUR_S:
+                continue
+            kept.append(w)
+            prev = k
+        if kept:
+            out.append(sub if len(kept) == len(ws) else _sub_from_dicts(kept))
+    return out
+
+
+# Primera palabra de verso pegada al final del anterior: el alineador le da
+# la cola de la nota sostenida previa ("...down A" / "king with no crown").
+# Si la linea acaba en inicio de verso y la siguiente empieza en minuscula o
+# "-", la palabra pasa a la siguiente, justo antes de su primera palabra
+# (max _LEAD_MAX_S); la palabra previa recupera su nota. Desactivable aqui.
+_LYRICS_MOVE_LEADS = True
+_LYRICS_LEAD_MAX_S = 0.5
+
+
+def _move_stray_leads(subs):
+    for a, b in zip(subs, subs[1:]):
+        wa, wb = a.get("words") or [], b.get("words") or []
+        if len(wa) < 2 or not wb or b["start"] <= a["end"]:
+            continue
+        nxt = wb[0]["text"]
+        if not (nxt[:1] == "-" or nxt[:1].islower()):
+            continue
+        p = wa[-2]
+        if wa[-1]["text"].lower() in _LYRICS_ALWAYS_UPPER:   # "I" / "want" (sin coma)
+            ok = (p["text"][-1:] in ".!?"
+                  or float(p["end"]) - float(p["start"]) >= _LYRICS_VERSE_HOLD_S)
+        else:
+            ok = _is_verse_start(p, wa[-1])
+        if not ok:
+            continue
+        w, prev = dict(wa[-1]), dict(wa[-2])
+        prev["end"] = w["end"]                # la nota previa dura hasta aqui
+        dur = min(float(w["end"]) - float(w["start"]), _LYRICS_LEAD_MAX_S)
+        w["end"] = wb[0]["start"]
+        w["start"] = round(float(w["end"]) - dur, 3)
+        a.update(_sub_from_dicts(wa[:-2] + [prev]))
+        b.update(_sub_from_dicts([w] + wb))
+    return subs
+
+
+def _merge_hyphen_tails(subs, merge_gap_s=_LYRICS_MERGE_GAP_S):
+    """Linea que empieza por "-o-us" es la cola de la palabra anterior
+    ("Ho-o-o" ... "-o-us and Judas"): se une si la pausa es corta."""
+    out = []
+    for sub in subs:
+        ws = sub.get("words") or []
+        if (out and ws and out[-1].get("words") and ws[0]["text"][:1] == "-"
+                and sub["start"] - out[-1]["end"] < merge_gap_s):
+            out[-1] = _sub_from_dicts(out[-1]["words"] + ws)
+        else:
+            out.append(sub)
+    return out
 
 
 def _split_long_subs(subs, max_s=_LYRICS_MAX_SEG_S):
@@ -451,6 +578,35 @@ def _merge_orphan_leads(subs, min_words=_LYRICS_MERGE_MIN_WORDS,
             out.append(cur)
             i += 1
     return out
+
+
+_CAPS_WORD = re.compile(r"\b[^\W\d_]{3,}\b")
+
+
+def _lower_caps(text):
+    """Pasa a minuscula las palabras en MAYUSCULAS de 3+ letras (las de 1-2
+    se quedan: siglas tipo DJ, pronombre I)."""
+    return _CAPS_WORD.sub(lambda m: m.group().lower() if m.group().isupper() else m.group(), text)
+
+
+def _uncap(sub):
+    """Whisper escribe lo gritado en MAYUSCULAS. Se pasa a minuscula palabra
+    a palabra, conservando la mayuscula inicial de la linea. Coste: nombres
+    propios gritados quedan en minuscula (MEDELLIN -> medellin)."""
+    text = _lower_caps(sub["text"])
+    if text == sub["text"]:
+        return sub
+    k = next((n for n, c in enumerate(text) if c.isalpha()), None)
+    if k is not None and sub["text"][k].isupper():
+        text = text[:k] + text[k].upper() + text[k + 1:]
+    sub["text"] = text
+    for n, w in enumerate(sub["words"]):
+        t = _lower_caps(w["text"])
+        if n == 0 and t != w["text"]:
+            k = next((m for m, c in enumerate(t) if c.isalpha()), 0)
+            t = t[:k] + t[k:k + 1].upper() + t[k + 1:]
+        w["text"] = t
+    return sub
 
 
 def _split_by_word_gaps(seg, gap_s=_LYRICS_WORD_GAP_S):
@@ -572,18 +728,15 @@ def run_lyrics(vocals_path, output_dir, language=None,
     # transcribe mejor con las armonias presentes.
     audio_for_whisper, tmp_mix = _prepare_vocals_for_whisper(vocals_path)
 
-    # Prompt de contexto solo cuando el usuario fija idioma. En auto no
-    # inyectamos nada para no sesgar la deteccion automatica.
-    prompt = _LYRICS_INITIAL_PROMPTS.get((language or "").lower()) if language else None
-
     print(f"[whisper] transcribing {audio_for_whisper} "
-          f"(language={language or 'auto'}, prompt={'yes' if prompt else 'no'})")
+          f"(language={language or 'auto'})")
     # Defaults de Whisper + ajustes minimos:
     # - condition_on_previous_text=False: rompe los bucles de repeticion
     #   infinita al no arrastrar la salida previa como contexto del
     #   siguiente segmento (causa clasica de alucinacion en cadena).
-    # - initial_prompt: pequeno ancla al registro "letra de cancion" para
-    #   reducir boilerplate tipo "Subtitulos por..." o "Suscribete al canal".
+    # - SIN initial_prompt: Whisper lo copiaba como letra en tramos sin voz
+    #   ("Song lyrics in English."), sobre todo en modo batched, que lo
+    #   inyecta en cada chunk.
     # - word_timestamps=True: fija seg.end al fin de la ultima palabra,
     #   evitando que Whisper infle el end hasta el siguiente segmento
     #   (o hasta el final del track para el ultimo). Los words se usan
@@ -593,7 +746,6 @@ def run_lyrics(vocals_path, output_dir, language=None,
         word_timestamps=True,
         vad_filter=True,                      # ignora silencios largos, ahorra tiempo
         condition_on_previous_text=False,
-        initial_prompt=prompt,
     )
     if pipeline is not None:
         segments_iter, info = pipeline.transcribe(
@@ -611,8 +763,15 @@ def run_lyrics(vocals_path, output_dir, language=None,
                 continue
             subs.append(sub)
 
+    subs = _drop_loop_words(subs)
+    subs = [sub for sub in subs if not _is_boilerplate(sub)]
+    if _LYRICS_MOVE_LEADS:
+        subs = _move_stray_leads(subs)
+    subs = _merge_hyphen_tails(subs)
     subs = _merge_orphan_leads(subs)
+    subs = [v for sub in subs for v in _split_verses(sub)]
     subs = _split_long_subs(subs)
+    subs = [_uncap(sub) for sub in subs]
 
     segments = []
     for sid, sub in enumerate(subs):
