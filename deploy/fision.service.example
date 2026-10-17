@@ -33,7 +33,7 @@ Environment=FISION_HOST=0.0.0.0
 Environment=FISION_PORT=8000
 
 # Lyrics
-Environment=FISION_WHISPER_MODEL=large-v3
+Environment=FISION_WHISPER_MODEL=large-v2
 # Batched Whisper, >= 8 GB VRAM (see "Scaling VRAM usage" in fision_server/README.md)
 #Environment=FISION_WHISPER_BATCH_SIZE=16
 

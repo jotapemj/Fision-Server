@@ -117,7 +117,7 @@ All configuration is read from environment variables.
 | `FISION_MAX_JOBS_PER_USER` | `3`                   | Live jobs (queued or running, separation and lyrics) per account. Beyond it, new jobs get `429` with `code: "job_limit"`. `0` disables the limit. |
 | `FISION_JOB_TIMEOUT_SEC` | `2400`                   | Maximum run time of a separation job, excluding the wait for VRAM. On expiry the whole process group is killed and the job ends with `timeout`. `0` disables it. |
 | `FISION_LYRICS_TIMEOUT_SEC` | `900`                 | Same limit for lyrics jobs.                        |
-| `FISION_WHISPER_MODEL`   | `large-v3`               | faster-whisper checkpoint used for lyrics.         |
+| `FISION_WHISPER_MODEL`   | `large-v2`               | faster-whisper checkpoint used for lyrics. `large-v2` hallucinates less than `large-v3` on sung vocals. |
 | `FISION_WHISPER_DEVICE`  | `cuda`                   | Device for Whisper inference (`cuda` or `cpu`).    |
 | `FISION_WHISPER_COMPUTE` | `float16`                | Whisper compute type (`float16`/`int8`/...).       |
 | `FISION_WHISPER_MIN_VRAM_MB` | `3072`               | Minimum free VRAM required to start a lyrics job.  |
@@ -185,13 +185,24 @@ and credentials are distributed out of band.
 python -m fision_server.useradd    <username> [--admin]  # create account (prompts for a password)
 python -m fision_server.usermod    <username> --admin|--no-admin  # grant or remove the admin role
 python -m fision_server.userpasswd <username>   # reset a password (invalidates old sessions)
-python -m fision_server.userdel    <username>   # delete an account (library folder is left intact)
+python -m fision_server.userdel    <username> [--purge]  # delete an account; --purge also removes its library, playlists and avatar
 ```
+
+These commands read the same environment variables as the server. Run them
+with the service's `FISION_DATA` and `FISION_LIBRARY` (for systemd:
+`systemctl show fision -p Environment`); otherwise they act on the default
+`./data` and `./library`. `useradd` and `userdel` print the paths they use.
 
 The first account created on a fresh installation is an administrator even
 without `--admin`, so the admin panel always has an owner. The last
 administrator cannot be deleted or demoted. If no administrator exists at
 startup, the server logs `AUDIT admin.missing` with the command to fix it.
+
+Without `--purge`, `userdel` keeps the account's library, playlists and avatar
+on disk, and a new account with the same name would inherit them; `useradd`
+lists such leftovers and asks before continuing. `userdel --purge` refuses to
+run while the account has live jobs, since a command-line tool cannot cancel
+them; cancel them from the admin panel first.
 
 ### Admin panel
 
@@ -248,6 +259,14 @@ Run it from the repository root with the same environment as the service
 (`FISION_LIBRARY`, `FISION_MODELS_DIR`, `FISION_CHORDS_*`). Clients holding a
 local copy of a song must download it again to see the new chords.
 
+Chord names in `chords.txt` use the MusGlyphs font notation: a `;` raises only
+the next character or ligature, so every superscript digit, accidental,
+parenthesis or word carries its own (`G;maj;7`, `C;1;3`, `Ebm;7;b;5`,
+`G;sus;4`); the root, `m`, `dim0` and the bass after `/` stay on the baseline.
+Songs processed before 1.11.5 wrote `Gmaj7` as `G;7` and multi-digit or
+altered extensions with a single `;`; regenerating their chords with the
+command above fixes them.
+
 Client login flow:
 
 1. `POST /login` with `{username, password}` returns
@@ -296,6 +315,15 @@ or only becomes apparent while streaming. Any other request body is limited to
 answer `429` with `{"detail": ..., "code": "job_limit"}` when the account
 already has `FISION_MAX_JOBS_PER_USER` live jobs. A cache hit on `POST /jobs`
 does not count, since it creates no job.
+
+Uploading a song that is already being processed returns the existing job when
+the configuration is the same, and `409` with `code: "job_running"` and its
+`job_id` when it differs; `POST /library/{hash}/reprocess` answers the same
+`409` while a job for that song is live. An empty file gets `400` with
+`code: "audio_empty"`, and audio shorter than 15 s gets `400` with
+`code: "audio_too_short"`: the separation models fail on clips shorter than
+their processing window (about 11 s). Files whose duration cannot be read from
+the header are accepted and left to the pipeline.
 
 | Method | Path                          | Description                                     |
 |--------|-------------------------------|-------------------------------------------------|
@@ -364,7 +392,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.4"
+  "version": "1.11.5"
 }
 ```
 
@@ -494,7 +522,7 @@ DELETE /library/{hash}/lyrics -> removes it (useful for a clean retry)
   "language": "en",
   "language_probability": 0.98,
   "duration": 234.5,
-  "model": "large-v3",
+  "model": "large-v2",
   "segments": [
     {
       "id": 0,
@@ -546,7 +574,7 @@ the lyrics survive re-separation.
 
 **GPU gating.** Lyrics jobs share the single global queue but use a separate
 VRAM threshold (`FISION_WHISPER_MIN_VRAM_MB`, default 3072 MB) since Whisper
-large-v3 in FP16 needs about 3 GB — less than a full separation. The model
+large-v2 in FP16 needs about 3 GB — less than a full separation. The model
 is loaded and released per job so it does not permanently occupy VRAM.
 
 **Client contract (Android).**
@@ -646,6 +674,11 @@ service does not start before the disks are mounted.
 
 The token layer applies regardless of how the server is exposed; treat it as the
 inner wall and the network layer as the outer one.
+
+The server speaks plain HTTP. With the default `FISION_HOST=0.0.0.0` it also
+listens on the local network, where passwords and tokens travel unencrypted.
+Tailscale encrypts its own traffic; to accept connections only through it, set
+`FISION_HOST` to the machine's Tailscale address (`tailscale ip -4`).
 
 - **LAN only** - nothing to expose.
 - **Tailscale** - private mesh address, no public exposure (recommended).

@@ -85,6 +85,13 @@ async def access_log(request: Request, call_next):
         if u:
             user = u
     response = await call_next(request)
+    # El navegador no adivina tipos (portadas de tags arbitrarias) y el panel
+    # no se deja enmarcar en otra web
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if request.url.path.startswith("/admin"):
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
     ms = (time.perf_counter() - start) * 1000
     log.access_line(request.method, request.url.path, response.status_code, user, ms)
     return response
@@ -273,6 +280,12 @@ async def _save_upload(file: UploadFile):
 
 
 # -------------------------------------------------------------------- jobs ----
+def _job_running(live):
+    return JSONResponse(status_code=409, content={
+        "detail": "La cancion ya se esta procesando", "code": "job_running",
+        "job_id": live["job_id"]})
+
+
 def _job_limit_hit(user):
     """429 con code estable si el usuario ya tiene el maximo de jobs vivos."""
     lim = config.MAX_JOBS_PER_USER
@@ -283,15 +296,45 @@ def _job_limit_hit(user):
     return None
 
 
+def _audio_seconds(path):
+    """Duracion por cabecera (mutagen), o None si no se puede leer."""
+    try:
+        from mutagen import File as _MFile
+        m = _MFile(path)
+        # ojo: un FileType sin tags es "falso"; mirar None, no la verdad
+        return float(m.info.length) if m is not None and m.info.length else None
+    except Exception:
+        return None
+
+
 def _enqueue_upload(user, tmp_path, ext, filename, cfg):
     """Hash + cache + encolado. Sync: va al threadpool (hashear 200 MB en el
     bucle de eventos congelaba el server para todos)."""
     lib = library.for_user(user)
+    if os.path.getsize(tmp_path) == 0:
+        os.remove(tmp_path)
+        return JSONResponse(status_code=400, content={
+            "detail": "Archivo vacio", "code": "audio_empty"})
+    secs = _audio_seconds(tmp_path)
+    if secs is not None and secs < config.MIN_AUDIO_SEC:
+        # Sin cabecera legible se deja pasar: decide el pipeline
+        os.remove(tmp_path)
+        return JSONResponse(status_code=400, content={
+            "detail": f"Audio demasiado corto (minimo {config.MIN_AUDIO_SEC} s)",
+            "code": "audio_too_short"})
     h = library.hash_file(tmp_path)
     meta = lib.read_meta(h)                        # cache hit dentro de SU biblioteca
     if meta and meta.get("estado") == "listo" and meta.get("config") == cfg:
         os.remove(tmp_path)
         return {"hash": h, "estado": "listo", "cached": True}
+    live = jobs.find_active(user, h)
+    if live:
+        # Ya se esta procesando: misma config -> el mismo job; otra -> 409
+        os.remove(tmp_path)
+        if live["config"] == cfg:
+            return {"hash": h, "job_id": live["job_id"],
+                    "estado": live["estado"], "cached": False}
+        return _job_running(live)
     limited = _job_limit_hit(user)
     if limited:
         os.remove(tmp_path)
@@ -319,6 +362,9 @@ def reprocess(h: str, config_json: str = Form("{}"),
     if not lib.exists(h) or lib.input_path(h) is None:
         raise HTTPException(404, "No existe ese audio")
     cfg = _parse_cfg(config_json)
+    live = jobs.find_active(user, h)
+    if live:
+        return _job_running(live)
     limited = _job_limit_hit(user)
     if limited:
         return limited
@@ -384,6 +430,12 @@ def lib_stem_file(h: str, filename: str, user: str = Depends(current_user)):
     target = (base / filename).resolve()
     if target.parent != base or not target.is_file():
         raise HTTPException(404, "No existe")
+    if filename == "artcover.png":
+        # Se llama .png pero son los bytes de la tag tal cual (a menudo JPEG)
+        with open(target, "rb") as f:
+            ext = avatars.sniff_ext(f.read(16))
+        return FileResponse(target, media_type=avatars.media_type(ext) if ext
+                            else "application/octet-stream")
     return FileResponse(target)
 
 

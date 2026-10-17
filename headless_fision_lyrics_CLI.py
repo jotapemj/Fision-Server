@@ -37,8 +37,8 @@ def main():
     p.add_argument("output_dir", help="Carpeta donde escribir lyrics.json")
     p.add_argument("language", nargs="?", default=None,
                    help="Codigo ISO (en/es/fr/...). 'auto' o ausente -> auto-detect.")
-    p.add_argument("--model", default="large-v3",
-                   help="Checkpoint de faster-whisper (large-v3 por defecto)")
+    p.add_argument("--model", default="large-v2",
+                   help="Checkpoint de faster-whisper (large-v2 por defecto)")
     p.add_argument("--device", default="cuda", choices=["cpu", "cuda"],
                    help="Procesador para la inferencia")
     p.add_argument("--compute", default="float16",

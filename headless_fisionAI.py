@@ -33,7 +33,11 @@ def _apply_models_dir():
 
 _apply_models_dir()
 
-_clic_seg = AudioSegment.from_file('resources/metronome.wav')
+# Rutas del repo, no del directorio de trabajo: el server o un CLI lanzado
+# desde otra carpeta no encontraban los recursos.
+_HERE = Path(__file__).resolve().parent
+
+_clic_seg = AudioSegment.from_file(str(_HERE / "resources" / "metronome.wav"))
 
 def _extract_cover_bytes(input_file: str):
     """Devuelve bytes de la portada si la hay, None si no. Soporta ID3 (mp3),
@@ -133,25 +137,6 @@ class Spinner:
     def stop(self):
         self.stop_running = True
         self.thread.join()
-
-
-# ---------- DEMUCS ----------
-def run_demucs(input_file: str, output_dir: str, device: str = "cpu"):
-    temp_file = None
-    if Path(input_file).suffix.lower() == ".mp3":
-        temp_file = Path(output_dir) / "temp.wav"
-        AudioSegment.from_mp3(input_file).export(temp_file, format="wav")
-        input_file = str(temp_file)
-
-    separator = demucs.api.Separator(model="mdx_extra", segment=12, device=device)
-    origin, separated = separator.separate_audio_file(input_file)
-
-    for i, (stem, sources) in enumerate(separated.items(), start=1):
-        save_path = Path(output_dir) / f"{stem}.wav"
-        demucs.api.save_audio(sources, path=save_path, samplerate=separator.samplerate)
-        print(f"[{i}/{len(separated)}] Saved {save_path}")
-
-    return temp_file
 
 
 # ---------- BEATS ----------
@@ -671,19 +656,20 @@ def _prepare_vocals_for_whisper(vocals_path):
 
 
 def run_lyrics(vocals_path, output_dir, language=None,
-               model_name="large-v3", device="cuda", compute_type="float16"):
+               model_name="large-v2", device="cuda", compute_type="float16"):
     """Transcribe la voz aislada con faster-whisper -> lyrics.json.
 
     - vocals_path: ruta a vocals.flac (o cualquier audio con solo voz).
     - output_dir : donde escribir lyrics.json.
     - language   : codigo ISO ("en", "es", "fr", ...). None -> auto-detect.
-    - model_name : checkpoint de Whisper. "large-v3" es el estandar.
+    - model_name : checkpoint de Whisper. "large-v2": mas robusto que v3 en
+                   canto (menos alucinacion).
     - device     : "cuda" o "cpu".
     - compute_type: precision de inferencia. "float16" para GPU, "int8" para CPU.
 
     Formato de salida (`lyrics.json`):
         {"language": "en", "language_probability": 0.98, "duration": 234.5,
-         "model": "large-v3",
+         "model": "large-v2",
          "segments": [
            {"id": 0, "start": 12.34, "end": 15.67, "text": "...",
             "words": [{"start": 12.34, "end": 12.55, "text": "I"}, ...]},
@@ -700,7 +686,6 @@ def run_lyrics(vocals_path, output_dir, language=None,
     baja frecuencia; asi liberamos VRAM entre jobs para no bloquear la
     separacion. Coste amortizable ~5 s de carga.
     """
-    import json
     import gc
     from faster_whisper import WhisperModel
 
@@ -727,7 +712,29 @@ def run_lyrics(vocals_path, output_dir, language=None,
     # Suma en dominio temporal a un WAV temporal; se borra al final. Whisper
     # transcribe mejor con las armonias presentes.
     audio_for_whisper, tmp_mix = _prepare_vocals_for_whisper(vocals_path)
+    try:
+        return _transcribe(model, pipeline, batch_size, audio_for_whisper,
+                           output_dir, language, model_name)
+    finally:
+        # Libera VRAM y borra el WAV del mix aunque Whisper reviente
+        del model, pipeline
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        if tmp_mix is not None:
+            try:
+                tmp_mix.unlink()
+            except OSError:
+                pass
 
+
+def _transcribe(model, pipeline, batch_size, audio_for_whisper, output_dir,
+                language, model_name):
+    import json
     print(f"[whisper] transcribing {audio_for_whisper} "
           f"(language={language or 'auto'})")
     # Defaults de Whisper + ajustes minimos:
@@ -791,89 +798,48 @@ def run_lyrics(vocals_path, output_dir, language=None,
         "segments": segments,
     }
 
+    # Atomico: un corte a medias nunca deja un lyrics.json truncado
     out_path = Path(output_dir) / "lyrics.json"
-    with open(out_path, "w", encoding="utf-8") as f:
+    tmp_path = out_path.with_suffix(".json.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, out_path)
     print(f"[whisper] lyrics written to {out_path} ({len(segments)} segments)")
-
-    # Libera VRAM al terminar.
-    del model
-    gc.collect()
-    try:
-        import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
-
-    # Borra el WAV temporal del mix vocals+vocals2 si se creo.
-    if tmp_mix is not None:
-        try:
-            tmp_mix.unlink()
-        except OSError:
-            pass
-
     return out
 
 
 # ---------- CHORDS SECTION -----------------
 
+# Reglas MusGlyphs 2.1 (comprobadas por JP con la fuente): ";" sube SOLO el
+# siguiente caracter o ligadura. Cada digito lleva el suyo (C;1;3 = 13; C;13
+# solo sube el 1), igual alteraciones y texto: C;maj;7, Ebm;7;b;5, C;sus;4.
 _QUALITY_MAP = {
     "min": "m", "mi": "m", "MI": "m", "MIN": "m",
     "maj": "",  "Maj": "", "MAJ": "", "MA": "", "ma": "",
     "dim0": "dim0", "dim/": "dim/", "dim": "dim0",
     "aug":  "aug",
-    "sus4": "sus4", "sus2": "sus2", "sus": "sus",  # sin ; aquí
+    "sus": "sus",
 }
+_MAJOR_KEYS = {"maj", "Maj", "MAJ", "MA", "ma"}
 
-_SUS_QUALITIES = {"sus", "sus2", "sus4"}
 
 def _parse_extensions(rest: str) -> str:
-    """
-    Convierte extensiones tipo '7b5', 'maj7', 'add9', '#11' etc.
-    en tokens MusGlyphs con ; delante de cada uno.
-    
-    Tokens reconocidos:
-      - maj7, maj9...  → ;maj;N  (maj en superíndice + número)
-      - add9, add11... → ;add;N
-      - b5, b9, #11   → ;b5, ;#11  (alteración + número, juntos)
-      - 7, 9, 11, 13  → ;N
-    """
+    """Extensiones ('7b5', 'maj7', 'add11', '#11', '(b9)') -> tokens
+    MusGlyphs, un ';' por digito, alteracion, parentesis o palabra."""
     result = ""
     i = 0
     while i < len(rest):
-        # --- prefijos de texto: maj, add ---
-        text_prefix = re.match(r"^(maj|add)", rest[i:], re.IGNORECASE)
-        if text_prefix:
-            prefix = text_prefix.group(1)
-            i += len(prefix)
-            # número que sigue
-            num = re.match(r"^\d+", rest[i:])
-            if num:
-                result += f";{prefix};{num.group()}"
-                i += len(num.group())
-            else:
-                result += f";{prefix}"
+        word = re.match(r"^(maj|add|sus|alt)", rest[i:], re.IGNORECASE)
+        if word:
+            result += ";" + word.group(1)
+            i += len(word.group(1))
             continue
-
-        # --- alteración + número: b5, #11, b9 ---
-        alt_num = re.match(r"^([b#])(\d+)", rest[i:])
-        if alt_num:
-            result += f";{alt_num.group(1)}{alt_num.group(2)}"
-            i += len(alt_num.group())
-            continue
-
-        # --- número solo: 7, 9, 11, 13 ---
-        num = re.match(r"^\d+", rest[i:])
-        if num:
-            result += f";{num.group()}"
-            i += len(num.group())
-            continue
-
-        # --- carácter desconocido: pasar tal cual ---
-        result += rest[i]
+        c = rest[i]
+        if c.isdigit() or c in "b#()+-":
+            result += ";" + c
+        else:
+            result += c                       # desconocido: tal cual
         i += 1
-
     return result
 
 
@@ -897,29 +863,28 @@ def _chord_to_musglyphs(chord: str) -> str:
     if not rest:
         return root + bass
 
-    # Calidad
+    # Calidad en linea (m, dim0, aug). "maj" seguido de numero no es calidad:
+    # es la extension maj7 (antes se comia el maj y Gmaj7 salia como G7).
     quality_mg = ""
-    matched_quality = ""
     for key in sorted(_QUALITY_MAP, key=len, reverse=True):
         if rest.startswith(key):
-            matched_quality = key
+            after = rest[len(key):]
+            if key in _MAJOR_KEYS and after[:1].isdigit():
+                break
+            if key == "sus":
+                break                         # sus va arriba: lo hace _parse_extensions
             quality_mg = _QUALITY_MAP[key]
-            rest = rest[len(key):]
+            rest = after
             break
     else:
         # 'm' minúscula suelta → menor
-        if rest.startswith("m"):
+        if rest.startswith("m") and not rest.startswith("maj"):
             quality_mg = "m"
             rest = rest[1:]
 
-    # Si la calidad es sus, va en superíndice
-    if matched_quality in _SUS_QUALITIES:
-        quality_mg = f";{quality_mg}"
+    return root + quality_mg + _parse_extensions(rest) + bass
 
-    ext_str = _parse_extensions(rest)
 
-    return root + quality_mg + ext_str + bass
-    
 def _cast_file_to_musglyphs(path: str):
     """Reescribe cada acorde del fichero en formato MusGlyphs. Tiempos intactos."""
     with open(path, "r", encoding="utf-8") as f:
@@ -975,7 +940,7 @@ def run_btc(input_file: str, output_dir: str, btc_script="btc_extractor.py"):
     }
     enharmonics = {"A#": "Bb", "C#": "Db", "D#": "Eb", "G#": "Ab"}
 
-    script_path = str(Path(os.getcwd()) / btc_script)
+    script_path = str(_HERE / btc_script)
     cmd = [sys.executable, script_path, input_file, str(output_dir)]
     print("Running BTC Chord Extractor subprocess...")
     subprocess.run(cmd, check=True)
@@ -1104,7 +1069,7 @@ def _write_sep_config(output_dir, sep_config):
 
 def start_audio_separator(input_file, output_dir, sep_config, device="cpu"):
     """Lanza el separador SIN bloquear. Devuelve el Popen."""
-    script_path = str(Path(os.getcwd()) / "audio_separator_script.py")
+    script_path = str(_HERE / "audio_separator_script.py")
     cfg_path = _write_sep_config(output_dir, sep_config)
     cmd = [sys.executable, script_path, input_file, output_dir, cfg_path]
 

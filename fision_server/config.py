@@ -21,6 +21,10 @@ LOCAL_USER = os.environ.get("FISION_LOCAL_USER", "local").strip().lower()
 # Se deja por compatibilidad, pero auth.py NO lo mira.
 API_TOKEN = os.environ.get("FISION_TOKEN", "").strip()
 
+# Raiz del repo: los CLI por defecto se buscan aqui, no en el directorio de
+# trabajo (arrancar el server desde otra carpeta los perdia).
+REPO_DIR = Path(__file__).resolve().parent.parent
+
 # Comando que lanza el orquestador en modo CLI (separacion + beats + chords).
 _CLI = os.environ.get("FISION_CLI", "").strip()
 
@@ -29,7 +33,7 @@ _LYRICS_CLI = os.environ.get("FISION_LYRICS_CLI", "").strip()
 
 
 def cli_command(input_path, out_dir, config_json):
-    base = _CLI.split() if _CLI else [sys.executable, "headless_fision_CLI.py"]
+    base = _CLI.split() if _CLI else [sys.executable, str(REPO_DIR / "headless_fision_CLI.py")]
     return base + [str(input_path), str(out_dir), str(config_json)]
 
 
@@ -42,7 +46,7 @@ def lyrics_cli_command(vocals_path, out_dir, language=None, device=None,
     WHISPER_COMPUTE). El worker los sobreescribe cuando degrada a CPU.
     """
     base = (_LYRICS_CLI.split() if _LYRICS_CLI
-            else [sys.executable, "headless_fision_lyrics_CLI.py"])
+            else [sys.executable, str(REPO_DIR / "headless_fision_lyrics_CLI.py")])
     lang = language or "auto"
     return base + [str(vocals_path), str(out_dir), lang,
                    "--model", WHISPER_MODEL,
@@ -55,6 +59,10 @@ PORT = int(os.environ.get("FISION_PORT", "8000"))
 MAX_UPLOAD_MB = int(os.environ.get("FISION_MAX_UPLOAD_MB", "200"))
 # Tope aparte para avatares. Nada de reutilizar el del audio.
 MAX_AVATAR_MB = int(os.environ.get("FISION_MAX_AVATAR_MB", "2"))
+# Duracion minima del audio. audio-separator 0.44.3 revienta con pistas mas
+# cortas que su trozo de RoFormer (~11 s: "size of tensor a (0)"); medido:
+# 3, 5 y 10 s fallan, 12 s en adelante bien. 15 s deja margen.
+MIN_AUDIO_SEC = 15
 
 # ------------------------------------------------------------------- GPU ----
 # Minimo de VRAM libre para dejar arrancar un job en cuda (MB).
@@ -67,13 +75,14 @@ GPU_WAIT_TIMEOUT_SEC = int(os.environ.get("FISION_GPU_WAIT_TIMEOUT_SEC", "600"))
 # --------------------------------------------------------------- WHISPER ----
 # Checkpoint de faster-whisper para lyrics. Se descarga en primer arranque
 # y queda en ~/.cache/huggingface/hub/.
-WHISPER_MODEL = os.environ.get("FISION_WHISPER_MODEL", "large-v3").strip()
+# large-v2 por defecto: en canto alucina menos que large-v3.
+WHISPER_MODEL = os.environ.get("FISION_WHISPER_MODEL", "large-v2").strip()
 # Dispositivo para la inferencia. "cuda" es lo esperado en el server con GPU.
 WHISPER_DEVICE = os.environ.get("FISION_WHISPER_DEVICE", "cuda").strip()
 # Precision. "float16" en GPU (mejor calidad/velocidad); "int8" si vas a CPU.
 WHISPER_COMPUTE = os.environ.get("FISION_WHISPER_COMPUTE", "float16").strip()
 # Minimo de VRAM libre para arrancar un job de lyrics (independiente del
-# GPU_MIN_VRAM_MB de separacion). large-v3 en fp16 pide ~3 GB.
+# GPU_MIN_VRAM_MB de separacion). large-v2/v3 en fp16 piden ~3 GB.
 WHISPER_MIN_VRAM_MB = int(os.environ.get("FISION_WHISPER_MIN_VRAM_MB", "3072"))
 
 LIBRARY_DIR.mkdir(parents=True, exist_ok=True)

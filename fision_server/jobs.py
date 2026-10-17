@@ -120,6 +120,16 @@ def create_job(user, audio_hash, name, cfg, reprocess=False, kind="separation"):
     return job
 
 
+def find_active(user, audio_hash, kind="separation"):
+    """Job vivo de ese tipo para (user, hash), o None."""
+    with _cond:
+        for j in _jobs.values():
+            if (j.get("kind", "separation") == kind and j.get("user") == user
+                    and j.get("hash") == audio_hash and j["estado"] in _LIVE):
+                return dict(j)
+    return None
+
+
 def has_active_lyrics(user, audio_hash):
     """True si ya hay un job de lyrics vivo (queued/running/waiting_gpu) para
     (user, hash). Usado por el endpoint POST /library/{h}/lyrics para evitar

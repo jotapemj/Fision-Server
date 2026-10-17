@@ -13,7 +13,7 @@ import sys
 import getpass
 import secrets
 
-from . import users, log
+from . import users, log, accounts
 
 
 def main():
@@ -30,6 +30,18 @@ def main():
     if users.exists(name):
         print(f"error: el usuario '{name}' ya existe")
         sys.exit(1)
+
+    print(f"biblioteca: {accounts.config.LIBRARY_DIR}   datos: {accounts.config.DATA_DIR}")
+    left = accounts.leftovers(name)
+    if left:
+        # Restos de una cuenta borrada sin purgar: la nueva los heredaria
+        print(f"aviso: hay datos de una cuenta '{name}' anterior:")
+        for p in left:
+            print(f"    {p}")
+        ans = input("La cuenta nueva los vera como suyos. Continuar? [s/N]: ")
+        if ans.strip().lower() not in ("s", "si", "y", "yes"):
+            print("cancelado. Si sobran, borra a mano las rutas de arriba.")
+            sys.exit(1)
 
     first = not users.list_users()
     admin = want_admin or first

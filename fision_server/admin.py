@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import (config, users, library, jobs, playlists, avatars, gpu, log,
-               __version__)
+               accounts, __version__)
 from .auth import current_user
 
 _STARTED = time.time()
@@ -221,9 +221,7 @@ def delete_user(name: str, purge: bool = False, admin: str = Depends(admin_user)
     # existe; se espera al que corre para no recrear carpetas tras el borrado
     jobs.cancel_matching(name)
     if purge:
-        shutil.rmtree(config.LIBRARY_DIR / name, ignore_errors=True)
-        playlists.purge(name)
-        avatars.delete(name)
+        accounts.purge(name)
         _forget_size(config.LIBRARY_DIR / name)
         _forget_size(config.LIBRARY_DIR)
     log.event("user.delete", user=name, by=admin, purge=purge)
@@ -415,7 +413,7 @@ _CONFIG = [
     ("separation", "FISION_SEP_AUTOCAST", "1"),
     ("separation", "FISION_DEMUCS_SHIFTS", "4"),
     ("separation", "FISION_DEMUCS_OVERLAP", "0.5"),
-    ("lyrics", "FISION_WHISPER_MODEL", "large-v3"),
+    ("lyrics", "FISION_WHISPER_MODEL", "large-v2"),
     ("lyrics", "FISION_WHISPER_DEVICE", "cuda"),
     ("lyrics", "FISION_WHISPER_COMPUTE", "float16"),
     ("lyrics", "FISION_WHISPER_MIN_VRAM_MB", "3072"),
