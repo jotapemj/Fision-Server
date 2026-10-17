@@ -101,13 +101,15 @@ All configuration is read from environment variables.
 | `FISION_SECRET`          | *(auto-generated)*       | Token-signing key. Persisted to `data/secret.key`. |
 | `FISION_TOKEN_TTL_HOURS` | `720`                    | Session lifetime (default 30 days).                |
 | `FISION_LOGIN_MAX_FAILS` | `5`                      | Failed logins per IP and username before `429`. `0` disables the limit. |
+| `FISION_LOGIN_MAX_FAILS_IP` | `20`                  | Failed logins per IP, across all usernames, before `429`. `0` disables the limit. |
 | `FISION_LOGIN_WINDOW_SEC` | `300`                   | Window for counting failed logins.                 |
 | `FISION_LOG_LEVEL`       | `INFO`                   | Log verbosity.                                     |
 | `FISION_ADMIN_ALLOW`     | loopback, private ranges, Tailscale | Comma-separated networks allowed to reach `/admin`. Other clients get `403` even with an administrator token. |
 | `FISION_HOST`            | `0.0.0.0`                | Bind address.                                      |
 | `FISION_PORT`            | `8000`                   | Bind port.                                         |
-| `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size.                               |
-| `FISION_MAX_AVATAR_MB`   | `2`                      | Maximum avatar upload size.                        |
+| `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size. Enforced before the request body is read. |
+| `FISION_MAX_AVATAR_MB`   | `2`                      | Maximum avatar and playlist cover upload size.     |
+| `FISION_API_DOCS`        | `0`                      | `1` serves the interactive API documentation at `/docs`, `/redoc` and `/openapi.json`. Disabled by default, since it lists every route. |
 | `FISION_GPU_MIN_VRAM_MB` | `4096`                   | Minimum free VRAM required to start a CUDA job.    |
 | `FISION_GPU_POLL_SEC`    | `30`                     | Poll interval while a job waits for free VRAM.     |
 | `FISION_GPU_WAIT_TIMEOUT_SEC` | `600`               | Hard timeout waiting for VRAM; aborts the job.     |
@@ -118,9 +120,9 @@ All configuration is read from environment variables.
 | `FISION_WHISPER_COMPUTE` | `float16`                | Whisper compute type (`float16`/`int8`/...).       |
 | `FISION_WHISPER_MIN_VRAM_MB` | `3072`               | Minimum free VRAM required to start a lyrics job.  |
 | `FISION_WHISPER_BATCH_SIZE` | `0`                   | If `>=2`, enable `BatchedInferencePipeline` (parallel chunks; higher VRAM, faster). |
-| `FISION_SEP_BATCH_SIZE`  | `24`                     | MDXC RoFormer batch size (audio-separator).        |
-| `FISION_SEP_SEGMENT_SIZE`| `512`                    | MDXC segment size.                                 |
-| `FISION_SEP_OVERLAP`     | `4`                      | MDXC overlap.                                      |
+| `FISION_SEP_BATCH_SIZE`  | `24`                     | Batch size of the MDX23C drum separator (split drums only). The RoFormer models process one chunk at a time and ignore it. |
+| `FISION_SEP_SEGMENT_SIZE`| `512`                    | Currently without effect: every MDXC model uses the segment size from its own configuration. |
+| `FISION_SEP_OVERLAP`     | `4`                      | MDXC overlap (RoFormer vocals and karaoke models). Higher is slower. |
 | `FISION_SEP_AUTOCAST`    | `1`                      | Enable autocast in audio-separator (`0` to disable). |
 | `FISION_DEMUCS_SHIFTS`   | `4`                      | HTDemucs random shifts (quality, not VRAM).        |
 | `FISION_DEMUCS_OVERLAP`  | `0.5`                    | HTDemucs segment overlap.                          |
@@ -152,15 +154,18 @@ in the old locations are not moved automatically.
 
 ### Scaling VRAM usage
 
-The defaults are conservative (Pascal / GTX 1050). On modern cards with
-more VRAM you can raise throughput by tuning the audio-separator MDXC
-batch and segment size, and by enabling Whisper batched inference:
+Separation is bound by compute, not by memory: each model processes the
+track chunk by chunk, so a separation job peaks at about 3.5 GB of VRAM
+even on a 24 GB card, and more VRAM does not make it faster. Measured on
+an RTX 3090 for a 4:45 track: 169 s in total, of which 103 s are
+HTDemucs (4 models x `FISION_DEMUCS_SHIFTS`). Lowering the shifts is the
+main speed lever, at some cost in quality.
+
+Whisper does benefit from free VRAM through batched inference:
 
 ```
-# Ampere+, ~16 GB VRAM
-FISION_SEP_BATCH_SIZE=48
-FISION_SEP_SEGMENT_SIZE=768
-FISION_WHISPER_BATCH_SIZE=8
+# Ampere+, >= 8 GB VRAM
+FISION_WHISPER_BATCH_SIZE=16
 ```
 
 `FISION_WHISPER_BATCH_SIZE >= 2` wraps the model with
@@ -264,13 +269,26 @@ never stored in clear text.
 Failed logins are limited per client IP and username: after
 `FISION_LOGIN_MAX_FAILS` failures within `FISION_LOGIN_WINDOW_SEC`, `/login`
 answers `429` with a `Retry-After` header until the oldest failure expires. A
-successful login resets the counter. The counter is held in memory and resets
+second counter limits each client IP to `FISION_LOGIN_MAX_FAILS_IP` failures
+across all usernames, so one address cannot try a password against many
+accounts. A successful login resets the per-username counter only. At most
+four password verifications run at the same time; further logins wait their
+turn instead of exhausting CPU and memory. The counter is held in memory and resets
 when the server restarts. Unknown usernames take the same verification time as
 existing ones, so response timing does not reveal which accounts exist.
 
 ## API
 
 All routes except `/health` and `/login` require `Authorization: Bearer <token>`.
+
+Request bodies are checked before they are read. Upload routes (`POST /jobs`,
+`POST /library/{hash}/reprocess`, `PUT /auth/avatar`,
+`PUT /playlists/{id}/cover`) answer `401` without reading the body when the
+token is missing or invalid, and `413` as soon as the body exceeds the limit
+(`FISION_MAX_UPLOAD_MB` for audio, `FISION_MAX_AVATAR_MB` for images, plus
+1 MiB for the form fields), whether the size is declared in `Content-Length`
+or only becomes apparent while streaming. Any other request body is limited to
+1 MiB. Partial uploads are buffered on the library disk, never in `/tmp`.
 
 | Method | Path                          | Description                                     |
 |--------|-------------------------------|-------------------------------------------------|
@@ -339,7 +357,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.2"
+  "version": "1.11.3"
 }
 ```
 
@@ -541,7 +559,9 @@ prefixes are emitted:
 ... AUDIT  user.create user=alice
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials
-... AUDIT  login.blocked user=alice ip=100.64.0.7
+... AUDIT  login.blocked user=alice ip=100.64.0.7 scope=user
+... AUDIT  upload.reject reason=missing path=/jobs user=-
+... AUDIT  upload.too_large path=/jobs bytes=524288000 limit=210763776
 ... AUDIT  token.refresh user=alice
 ... AUDIT  auth.reject reason=expired user=alice
 ... AUDIT  user.role user=alice role=admin by=cli
@@ -617,7 +637,12 @@ inner wall and the network layer as the outer one.
 
 - **LAN only** - nothing to expose.
 - **Tailscale** - private mesh address, no public exposure (recommended).
-- **Cloudflare Tunnel** - public URL, optionally behind Cloudflare Access.
+- **Cloudflare Tunnel** - public URL, optionally behind Cloudflare Access. The
+  free and Pro plans cap request bodies at 100 MB, below the default
+  `FISION_MAX_UPLOAD_MB`, and Cloudflare's terms restrict serving large audio
+  files; check both before relying on it. When `cloudflared` runs on another
+  host or in a container, its requests come from a private address inside
+  `FISION_ADMIN_ALLOW`: block `/admin` in the tunnel configuration.
 - **WireGuard** - a single UDP port, invisible to unsolicited traffic.
 
 ## Roadmap

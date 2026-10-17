@@ -34,11 +34,11 @@ Environment=FISION_PORT=8000
 
 # Lyrics
 Environment=FISION_WHISPER_MODEL=large-v3
-#Environment=FISION_WHISPER_BATCH_SIZE=8
+# Batched Whisper, >= 8 GB VRAM (see "Scaling VRAM usage" in fision_server/README.md)
+#Environment=FISION_WHISPER_BATCH_SIZE=16
 
-# VRAM tuning (see "Scaling VRAM usage" in fision_server/README.md)
-#Environment=FISION_SEP_BATCH_SIZE=48
-#Environment=FISION_SEP_SEGMENT_SIZE=768
+# Separation speed vs quality (HTDemucs passes per model)
+#Environment=FISION_DEMUCS_SHIFTS=4
 
 # Job limits (seconds, 0 = no limit)
 #Environment=FISION_JOB_TIMEOUT_SEC=2400

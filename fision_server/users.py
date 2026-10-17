@@ -18,6 +18,7 @@ Alta/baja se hacen desde la CAJA (CLI). No hay registro publico.
 import os
 import re
 import json
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -28,6 +29,9 @@ from . import config
 
 _ph = PasswordHasher()
 _dummy_hash = None              # señuelo: iguala el tiempo si el usuario no existe
+# Verificaciones argon2 a la vez (cada una ~CPU + 64 MiB). Una avalancha de
+# /login espera en cola en vez de saturar CPU y RAM.
+_ARGON_SLOTS = threading.BoundedSemaphore(4)
 _USER_RE = re.compile(r"^[a-z0-9_]{2,32}$")
 
 
@@ -150,6 +154,11 @@ def delete(name):
 # ------------------------------------------------------------ password ----
 def verify(name, password):
     """True si la password casa. Rehashea de fondo si argon2 subio parametros."""
+    with _ARGON_SLOTS:
+        return _verify(name, password)
+
+
+def _verify(name, password):
     data = _load()
     u = data.get(name)
     if not u:

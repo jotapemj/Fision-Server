@@ -1,9 +1,13 @@
 """
-Limite de intentos de login fallidos por (IP, usuario). En memoria: un
-reinicio lo vacia, aceptable para un server self-hosted.
+Limite de intentos de login fallidos. En memoria: un reinicio lo vacia,
+aceptable para un server self-hosted.
 
-N fallos dentro de la ventana -> bloqueado hasta que el mas viejo caduque.
-Un login correcto limpia el contador.
+Dos contadores en la misma ventana:
+  - (IP, usuario): N fallos -> esa cuenta bloqueada desde esa IP.
+  - IP sola: M fallos contra cualquier cuenta -> esa IP bloqueada. Frena
+    probar una password contra muchas cuentas (y el gasto de argon2).
+Bloqueado hasta que el fallo mas viejo caduque. Un login correcto limpia el
+contador (IP, usuario), no el de la IP.
 """
 import time
 import threading
@@ -11,7 +15,7 @@ import threading
 from . import config
 
 _lock = threading.Lock()
-_fails = {}                     # (ip, user) -> [timestamps de fallos]
+_fails = {}                     # (ip, user) o ip -> [timestamps de fallos]
 _PRUNE_AT = 1000                # limpia claves caducadas a partir de este tamaño
 
 
@@ -24,22 +28,30 @@ def _recent(key, now):
     return ts
 
 
-def retry_after(ip, user):
-    """Segundos hasta poder reintentar; 0 si no esta bloqueado."""
-    if config.LOGIN_MAX_FAILS <= 0:
+def _wait(ts, limit, now):
+    if limit <= 0 or len(ts) < limit:
         return 0
+    return max(1, int(config.LOGIN_WINDOW_SEC - (now - ts[-limit])) + 1)
+
+
+def retry_after(ip, user):
+    """(segundos hasta poder reintentar, scope "ip"|"user"); (0, None) si libre."""
     now = time.monotonic()
     with _lock:
-        ts = _recent((ip, user), now)
-        if len(ts) < config.LOGIN_MAX_FAILS:
-            return 0
-        return max(1, int(config.LOGIN_WINDOW_SEC - (now - ts[0])) + 1)
+        w_ip = _wait(_recent(ip, now), config.LOGIN_MAX_FAILS_IP, now)
+        w_user = _wait(_recent((ip, user), now), config.LOGIN_MAX_FAILS, now)
+    if w_ip >= w_user and w_ip:
+        return w_ip, "ip"
+    if w_user:
+        return w_user, "user"
+    return 0, None
 
 
 def fail(ip, user):
     now = time.monotonic()
     with _lock:
         _fails.setdefault((ip, user), []).append(now)
+        _fails.setdefault(ip, []).append(now)
         if len(_fails) > _PRUNE_AT:
             # Sin esto, usernames aleatorios harian crecer el dict sin fin
             for k in list(_fails):

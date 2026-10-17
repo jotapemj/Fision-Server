@@ -41,13 +41,15 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from . import (config, library, jobs, users, security, log, avatars, gpu,
-               ratelimit, playlists, admin, __version__)
+               ratelimit, playlists, admin, limits, __version__)
 from .auth import current_user, bearer_token
 
 
 @asynccontextmanager
 async def lifespan(app):
     log.setup()
+    # Spool del multipart al disco de la biblioteca, nunca a /tmp (tmpfs = RAM)
+    tempfile.tempdir = str(config.INCOMING_DIR)
     gpu.detect()                      # una unica deteccion; el cache vive todo el arranque
     info = gpu.info()
     log.event("server.start", gpu=info["gpu"], gpu_name=info["gpu_name"],
@@ -61,7 +63,12 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Fision AI Server", lifespan=lifespan)
+# /docs, /redoc y /openapi.json listan toda la API: apagados salvo FISION_API_DOCS=1
+_docs = config.API_DOCS
+app = FastAPI(title="Fision AI Server", lifespan=lifespan,
+              docs_url="/docs" if _docs else None,
+              redoc_url="/redoc" if _docs else None,
+              openapi_url="/openapi.json" if _docs else None)
 app.include_router(admin.router)          # /admin (pagina) + /admin/api/...
 
 
@@ -79,6 +86,11 @@ async def access_log(request: Request, call_next):
     ms = (time.perf_counter() - start) * 1000
     log.access_line(request.method, request.url.path, response.status_code, user, ms)
     return response
+
+
+# Tope de cuerpo y token de subidas ANTES de leer nada. Va fuera del access
+# log (anadido despues = capa exterior): corta sin tocar el resto de la pila.
+app.add_middleware(limits.BodyLimit)
 
 
 @app.get("/health")
@@ -107,9 +119,9 @@ class LoginIn(BaseModel):
 def login(body: LoginIn, request: Request):
     name = (body.username or "").strip().lower()
     ip = request.client.host if request.client else "-"
-    wait = ratelimit.retry_after(ip, name)
+    wait, scope = ratelimit.retry_after(ip, name)
     if wait:
-        log.event("login.blocked", user=name or "-", ip=ip)
+        log.event("login.blocked", user=name or "-", ip=ip, scope=scope)
         raise HTTPException(status_code=429, detail="Demasiados intentos",
                             headers={"Retry-After": str(wait)})
     # verify() siempre: con usuario inexistente gasta lo mismo (hash señuelo)

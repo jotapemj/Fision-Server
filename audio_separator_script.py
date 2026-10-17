@@ -167,8 +167,10 @@ def build_separator(output_dir):
     """Un unico Separator para todo el pipeline.
 
     Parametros exprimibles via env (prefijo FISION_):
-      FISION_SEP_BATCH_SIZE    default 24   (MDXC RoFormer)
-      FISION_SEP_SEGMENT_SIZE  default 512
+      FISION_SEP_BATCH_SIZE    default 24   (solo DrumSep; RoFormer va
+                                             chunk a chunk y lo ignora)
+      FISION_SEP_SEGMENT_SIZE  default 512  (sin efecto: override False,
+                                             manda el yaml del modelo)
       FISION_SEP_OVERLAP       default 4
       FISION_SEP_AUTOCAST      default 1    (1=True, 0=False)
       FISION_DEMUCS_SHIFTS     default 4    (calidad, no VRAM)
@@ -177,10 +179,9 @@ def build_separator(output_dir):
                                ~/.cache/audio-separator-models si no hay
                                raiz (persistente; el de la lib es /tmp)
 
-    Defaults conservadores (tuning Pascal / GTX 1050). Con 16 GB se
-    puede subir batch_size a 40-64 y segment_size a 768/1024 para
-    reducir pases y ganar velocidad. En Ampere+ autocast fp16 tiene
-    sentido; en Pascal fp16 va lentisimo, dejar autocast en 0 (fp32).
+    El cuello es computo, no VRAM (pico ~3.4 GB en una 3090): mas VRAM
+    no acelera. La palanca es FISION_DEMUCS_SHIFTS. En Ampere+ autocast
+    fp16 tiene sentido; en Pascal va lentisimo, dejar autocast en 0.
     """
     try:
         import torch
@@ -213,7 +214,7 @@ def build_separator(output_dir):
         model_file_dir=model_dir,
         output_format="FLAC",
         use_autocast=autocast,
-        mdxc_params={                  # solo afecta a los RoFormer (MDXC)
+        mdxc_params={                  # RoFormer y DrumSep (MDXC)
             "segment_size": segment_size,
             "override_model_segment_size": False,
             "overlap": overlap,

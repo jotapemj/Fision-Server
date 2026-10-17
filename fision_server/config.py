@@ -106,6 +106,12 @@ PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 # Login: N fallos por (IP, usuario) dentro de la ventana -> 429. 0 = sin limite.
 LOGIN_MAX_FAILS = int(os.environ.get("FISION_LOGIN_MAX_FAILS", "5"))
 LOGIN_WINDOW_SEC = int(os.environ.get("FISION_LOGIN_WINDOW_SEC", "300"))
+# Fallos por IP (cualquier usuario) en la misma ventana: frena probar una
+# password contra muchas cuentas. 0 = sin limite.
+LOGIN_MAX_FAILS_IP = int(os.environ.get("FISION_LOGIN_MAX_FAILS_IP", "20"))
+
+# Documentacion interactiva de la API (/docs, /redoc, /openapi.json).
+API_DOCS = os.environ.get("FISION_API_DOCS", "0").strip() in ("1", "true", "yes")
 
 # Duracion del token de sesion. 720h = 30 dias (comodo para app movil).
 TOKEN_TTL_HOURS = int(os.environ.get("FISION_TOKEN_TTL_HOURS", "720"))
