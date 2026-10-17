@@ -13,7 +13,9 @@ Dos lineas de eventos, faciles de grepear:
 Ver solo eventos de usuario en el servicio:
     journalctl -u fision -f | grep AUDIT
 """
+import re
 import sys
+import json
 import logging
 import threading
 from collections import deque
@@ -52,20 +54,36 @@ audit = logging.getLogger("fision.audit")
 access = logging.getLogger("fision.access")
 
 
+# sin espacios, controles (ESC incluido), comillas, = ni barra invertida
+_PLAIN = re.compile(r'^[^\s\x00-\x1f\x7f"=\\]*$')
+_MAX_VALUE = 200
+
+
+def _fmt(v):
+    """Valor seguro en una linea de log. Lo que viene del cliente (nombre de
+    login, ruta) podia meter saltos de linea y fabricar lineas AUDIT falsas:
+    si no es plano va entre comillas con escapes JSON. Tope de longitud."""
+    s = str(v)
+    if len(s) > _MAX_VALUE:
+        s = s[:_MAX_VALUE] + "..."
+    return s if _PLAIN.match(s) else json.dumps(s, ensure_ascii=False)
+
+
 def _kv(d):
-    return " ".join(f"{k}={v}" for k, v in d.items() if v is not None and v != "")
+    return " ".join(f"{k}={_fmt(v)}" for k, v in d.items() if v is not None and v != "")
 
 
 def event(name, user=None, **fields):
     """Evento de auditoria. Ej: event('user.create', user='valeria')."""
     setup()
     tail = _kv({"user": user, **fields})
-    audit.info("AUDIT %s %s", name, tail)
+    audit.info("AUDIT %s %s", _fmt(name), tail)
     with _recent_lock:
         _recent.append({
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "event": name, "user": user or "",
-            "fields": {k: str(v) for k, v in fields.items() if v is not None and v != ""},
+            "event": name, "user": str(user or "")[:_MAX_VALUE],
+            "fields": {k: str(v)[:_MAX_VALUE] for k, v in fields.items()
+                       if v is not None and v != ""},
         })
 
 
@@ -80,4 +98,4 @@ def access_line(method, path, status, user, ms):
     """Una linea por peticion HTTP, con el usuario que la hizo (o '-')."""
     setup()
     access.info("ACCESS user=%s %s %s %s %.0fms",
-                user or "-", method, path, status, ms)
+                _fmt(user or "-"), _fmt(method), _fmt(path), status, ms)

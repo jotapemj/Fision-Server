@@ -62,6 +62,7 @@ library/.incoming/  uploads in progress; same filesystem as the library so the
 
 data/
     users.json      accounts: username + argon2 password hash + token epoch
+    users.lock      lock file serialising writes to users.json (server and CLI)
     secret.key      token-signing key (auto-generated; deleting it logs everyone out)
     queue.json      live queue (queued + running), so jobs survive a restart
     avatars/        one profile image per account
@@ -113,6 +114,7 @@ All configuration is read from environment variables.
 | `FISION_GPU_MIN_VRAM_MB` | `4096`                   | Minimum free VRAM required to start a CUDA job.    |
 | `FISION_GPU_POLL_SEC`    | `30`                     | Poll interval while a job waits for free VRAM.     |
 | `FISION_GPU_WAIT_TIMEOUT_SEC` | `600`               | Hard timeout waiting for VRAM; aborts the job.     |
+| `FISION_MAX_JOBS_PER_USER` | `3`                   | Live jobs (queued or running, separation and lyrics) per account. Beyond it, new jobs get `429` with `code: "job_limit"`. `0` disables the limit. |
 | `FISION_JOB_TIMEOUT_SEC` | `2400`                   | Maximum run time of a separation job, excluding the wait for VRAM. On expiry the whole process group is killed and the job ends with `timeout`. `0` disables it. |
 | `FISION_LYRICS_TIMEOUT_SEC` | `900`                 | Same limit for lyrics jobs.                        |
 | `FISION_WHISPER_MODEL`   | `large-v3`               | faster-whisper checkpoint used for lyrics.         |
@@ -290,6 +292,11 @@ token is missing or invalid, and `413` as soon as the body exceeds the limit
 or only becomes apparent while streaming. Any other request body is limited to
 1 MiB. Partial uploads are buffered on the library disk, never in `/tmp`.
 
+`POST /jobs`, `POST /library/{hash}/reprocess` and `POST /library/{hash}/lyrics`
+answer `429` with `{"detail": ..., "code": "job_limit"}` when the account
+already has `FISION_MAX_JOBS_PER_USER` live jobs. A cache hit on `POST /jobs`
+does not count, since it creates no job.
+
 | Method | Path                          | Description                                     |
 |--------|-------------------------------|-------------------------------------------------|
 | POST   | `/login`                      | Exchange username + password for a token.       |
@@ -309,7 +316,7 @@ or only becomes apparent while streaming. Any other request body is limited to
 | GET    | `/library/{hash}`             | Metadata for one song.                           |
 | GET    | `/library/{hash}/zip`         | Download the current `result.zip`.               |
 | GET    | `/library/{hash}/stems/{file}`| Serve a stems file (cover art or audio).         |
-| DELETE | `/library/{hash}`             | Delete the entry.                                |
+| DELETE | `/library/{hash}`             | Delete the entry; cancels its live jobs first.   |
 | POST   | `/library/{hash}/lyrics`      | Enqueue a Whisper transcription over `vocals.flac`.|
 | GET    | `/library/{hash}/lyrics`      | Serve `lyrics.json` (404 if not generated yet).   |
 | DELETE | `/library/{hash}/lyrics`      | Remove the current `lyrics.json`.                 |
@@ -357,7 +364,7 @@ GET /server/info
   "driver": "550.54.15",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.3"
+  "version": "1.11.4"
 }
 ```
 
@@ -442,7 +449,9 @@ localize from `code` and fall back to `detail` only for unknown codes. Local-onl
 songs cannot be added.
 
 Deleting a song with `DELETE /library/{hash}` also removes it from every
-playlist of that account. Covers follow the avatar rules: JPEG, PNG or WebP
+playlist of that account. Queued and running jobs for that song are cancelled
+first, and the request waits until the running one has stopped; if it does not
+stop within 60 s the response is `409` and nothing is deleted. Covers follow the avatar rules: JPEG, PNG or WebP
 detected by magic bytes, up to `FISION_MAX_AVATAR_MB`, cropped by the client.
 
 ## Lyrics
@@ -465,7 +474,9 @@ Return: {"job_id": "...", "hash": "...", "estado": "queued"}
 
 Whisper supports 99 languages; some common ISO codes: `en`, `es`, `fr`, `de`,
 `it`, `pt`, `nl`, `ru`, `ja`, `ko`, `zh`, `ar`, `tr`, `pl`, `sv`, `hi`. Set
-`language` to `null` (or omit it) to let Whisper detect it.
+`language` to `null`, `"auto"` (or omit it) to let Whisper detect it. Any
+other value must be a two- or three-letter ISO code; otherwise the response is
+`400`.
 
 Once the job finishes, `lyrics.json` is written into the song's `stems/`
 folder next to the other outputs and is also included in the next
@@ -578,6 +589,7 @@ prefixes are emitted:
 ... AUDIT  job.gpu_ready   job_id=ab12cd34ef56
 ... AUDIT  job.gpu_timeout job_id=ab12cd34ef56
 ... AUDIT  job.gpu_fallback job_id=ab12cd34ef56 reason=no_gpu
+... AUDIT  job.limit user=alice limit=3
 ... ACCESS user=alice POST /jobs 200 143ms
 ```
 

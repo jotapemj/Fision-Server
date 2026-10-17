@@ -18,8 +18,15 @@ Alta/baja se hacen desde la CAJA (CLI). No hay registro publico.
 import os
 import re
 import json
+import functools
 import threading
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl                        # POSIX: lock entre procesos (server + CLI)
+except ImportError:                     # Windows: solo el lock del proceso
+    fcntl = None
 from datetime import datetime, timezone
 
 from argon2 import PasswordHasher
@@ -44,6 +51,35 @@ def _now():
 
 
 # ---------------------------------------------------------------- store ----
+# Leer-modificar-guardar bajo lock: los hilos del server y los CLI (useradd,
+# userpasswd...) escriben el mismo users.json; sin esto un cambio podia
+# pisar a otro (p. ej. perderse un cierre de sesiones).
+_rlock = threading.RLock()
+
+
+@contextmanager
+def _locked():
+    with _rlock:
+        if fcntl is None:
+            yield
+            return
+        lock = Path(config.USERS_FILE).with_suffix(".lock")
+        with open(lock, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _rmw(fn):
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        with _locked():
+            return fn(*a, **kw)
+    return wrapper
+
+
 def _load():
     p = Path(config.USERS_FILE)
     if not p.exists():
@@ -91,6 +127,7 @@ def admins():
     return sorted(n for n, u in _load().items() if u.get("role") == "admin")
 
 
+@_rmw
 def set_admin(name, flag):
     """Da o quita el rol admin. Nunca deja el servidor sin admin."""
     data = _load()
@@ -107,6 +144,7 @@ def set_admin(name, flag):
     _save(data)
 
 
+@_rmw
 def revoke_sessions(name):
     """Sube token_epoch sin tocar la password: cierra todas sus sesiones."""
     data = _load()
@@ -119,6 +157,7 @@ def revoke_sessions(name):
 
 
 # ----------------------------------------------------------------- altas ----
+@_rmw
 def create(name, password, admin=False):
     """Alta de usuario. Falla si el nombre no es valido o ya existe."""
     if not valid_username(name):
@@ -141,6 +180,7 @@ def create(name, password, admin=False):
     _save(data)
 
 
+@_rmw
 def delete(name):
     data = _load()
     if name not in data:
@@ -176,16 +216,24 @@ def _verify(name, password):
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return False
     # mantenimiento: si el hash quedo con params viejos, lo refrescamos
+    # (relee bajo lock y solo si nadie cambio la password entretanto)
     try:
-        if _ph.check_needs_rehash(u["pwd_hash"]):
-            u["pwd_hash"] = _ph.hash(password)
-            u["updated_at"] = _now()
-            _save(data)
+        old = u["pwd_hash"]
+        if _ph.check_needs_rehash(old):
+            new = _ph.hash(password)
+            with _locked():
+                data = _load()
+                cur = data.get(name)
+                if cur and cur.get("pwd_hash") == old:
+                    cur["pwd_hash"] = new
+                    cur["updated_at"] = _now()
+                    _save(data)
     except Exception:
         pass
     return True
 
 
+@_rmw
 def set_password(name, new_password):
     """Cambia la password y SUBE token_epoch -> invalida todos los tokens viejos."""
     if not new_password or len(new_password) < 8:

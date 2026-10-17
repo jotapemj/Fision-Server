@@ -31,12 +31,14 @@ API HTTP de Fision. La app movil habla con estos endpoints.
 El usuario sale SIEMPRE del token (Depends(current_user)); nunca de la URL.
 """
 import os
+import re
 import json
 import time
 import tempfile
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
@@ -271,33 +273,55 @@ async def _save_upload(file: UploadFile):
 
 
 # -------------------------------------------------------------------- jobs ----
-@app.post("/jobs")
-async def submit(file: UploadFile = File(...), config_json: str = Form("{}"),
-                 user: str = Depends(current_user)):
-    lib = library.for_user(user)
-    cfg = _parse_cfg(config_json)
-    tmp_path, ext = await _save_upload(file)
-    h = library.hash_file(tmp_path)
+def _job_limit_hit(user):
+    """429 con code estable si el usuario ya tiene el maximo de jobs vivos."""
+    lim = config.MAX_JOBS_PER_USER
+    if lim > 0 and jobs.count_active(user) >= lim:
+        log.event("job.limit", user=user, limit=lim)
+        return JSONResponse(status_code=429, content={
+            "detail": f"Maximo {lim} trabajos en cola por usuario", "code": "job_limit"})
+    return None
 
+
+def _enqueue_upload(user, tmp_path, ext, filename, cfg):
+    """Hash + cache + encolado. Sync: va al threadpool (hashear 200 MB en el
+    bucle de eventos congelaba el server para todos)."""
+    lib = library.for_user(user)
+    h = library.hash_file(tmp_path)
     meta = lib.read_meta(h)                        # cache hit dentro de SU biblioteca
     if meta and meta.get("estado") == "listo" and meta.get("config") == cfg:
         os.remove(tmp_path)
         return {"hash": h, "estado": "listo", "cached": True}
-
+    limited = _job_limit_hit(user)
+    if limited:
+        os.remove(tmp_path)
+        return limited
     lib.save_input(h, tmp_path, ext)
-    job = jobs.create_job(user, h, file.filename or h, cfg, reprocess=bool(meta))
+    job = jobs.create_job(user, h, filename or h, cfg, reprocess=bool(meta))
     return {"hash": h, "job_id": job["job_id"],
             "estado": job["estado"], "cached": False}
 
 
+@app.post("/jobs")
+async def submit(file: UploadFile = File(...), config_json: str = Form("{}"),
+                 user: str = Depends(current_user)):
+    cfg = _parse_cfg(config_json)
+    tmp_path, ext = await _save_upload(file)
+    return await run_in_threadpool(_enqueue_upload, user, tmp_path, ext,
+                                   file.filename, cfg)
+
+
 @app.post("/library/{h}/reprocess")
-async def reprocess(h: str, config_json: str = Form("{}"),
-                    user: str = Depends(current_user)):
+def reprocess(h: str, config_json: str = Form("{}"),
+              user: str = Depends(current_user)):
     _require_hash(h)
     lib = library.for_user(user)
     if not lib.exists(h) or lib.input_path(h) is None:
         raise HTTPException(404, "No existe ese audio")
     cfg = _parse_cfg(config_json)
+    limited = _job_limit_hit(user)
+    if limited:
+        return limited
     meta = lib.read_meta(h) or {}
     job = jobs.create_job(user, h, meta.get("nombre", h), cfg, reprocess=True)
     return {"hash": h, "job_id": job["job_id"], "estado": job["estado"]}
@@ -369,6 +393,10 @@ def lib_delete(h: str, user: str = Depends(current_user)):
     lib = library.for_user(user)
     if not lib.exists(h):
         raise HTTPException(404, "No existe")
+    # Antes de borrar: fuera sus jobs, y espera a que el worker suelte el que
+    # corre (si no, al fallar reescribia meta.json y la cancion "volvia")
+    if not jobs.cancel_matching(user, h):
+        raise HTTPException(409, "La cancion sigue procesandose; reintenta")
     lib.delete_entry(h)
     n = playlists.remove_song(user, h)        # fuera de la nube = fuera de playlists
     if n:
@@ -470,6 +498,9 @@ def pl_cover_delete(pid: str, user: str = Depends(current_user)):
 
 
 # ---------------------------------------------------------------- lyrics ----
+_LANG_RE = re.compile(r"^[a-z]{2,3}$")       # ISO 639-1/-3, como espera Whisper
+
+
 class LyricsIn(BaseModel):
     language: str | None = None                    # ISO code o None (auto)
 
@@ -482,6 +513,12 @@ def lyrics_start(h: str, body: LyricsIn, user: str = Depends(current_user)):
     otro job de lyrics activo para el mismo hash.
     """
     _require_hash(h)
+    lang = (body.language or "").strip().lower() or None
+    if lang == "auto":
+        lang = None
+    if lang and not _LANG_RE.match(lang):
+        # va como argumento al CLI: solo codigos ISO, nada que parezca una opcion
+        raise HTTPException(400, "language debe ser un codigo ISO (es, en...) o auto")
     lib = library.for_user(user)
     if not lib.exists(h):
         raise HTTPException(404, "No existe")
@@ -492,7 +529,9 @@ def lyrics_start(h: str, body: LyricsIn, user: str = Depends(current_user)):
     if jobs.has_active_lyrics(user, h):
         raise HTTPException(409, "Ya hay un job de lyrics en curso para esta cancion")
 
-    lang = (body.language or "").strip() or None
+    limited = _job_limit_hit(user)
+    if limited:
+        return limited
     m = lib.read_meta(h) or {}
     job = jobs.create_job(user, h, m.get("nombre", h),
                           {"language": lang}, reprocess=False, kind="lyrics")

@@ -217,10 +217,9 @@ def delete_user(name: str, purge: bool = False, admin: str = Depends(admin_user)
         users.delete(name)
     except ValueError:
         return _err("last_admin", "No se puede borrar el ultimo administrador")
-    # sus trabajos vivos no deben seguir escribiendo en una cuenta que ya no existe
-    for j in jobs.list_all_active():
-        if j["user"] == name:
-            jobs.cancel_job(j["job_id"])
+    # sus trabajos vivos no deben seguir escribiendo en una cuenta que ya no
+    # existe; se espera al que corre para no recrear carpetas tras el borrado
+    jobs.cancel_matching(name)
     if purge:
         shutil.rmtree(config.LIBRARY_DIR / name, ignore_errors=True)
         playlists.purge(name)
@@ -407,6 +406,7 @@ _CONFIG = [
     ("gpu", "FISION_GPU_MIN_VRAM_MB", "4096"),
     ("gpu", "FISION_GPU_POLL_SEC", "30"),
     ("gpu", "FISION_GPU_WAIT_TIMEOUT_SEC", "600"),
+    ("jobs", "FISION_MAX_JOBS_PER_USER", "3"),
     ("jobs", "FISION_JOB_TIMEOUT_SEC", "2400"),
     ("jobs", "FISION_LYRICS_TIMEOUT_SEC", "900"),
     ("separation", "FISION_SEP_BATCH_SIZE", "24"),

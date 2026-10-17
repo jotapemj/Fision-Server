@@ -230,6 +230,9 @@ def cancel_job(jid, user=None):
         else:
             return False
 
+    with _cond:
+        _cond.notify_all()                    # despierta la espera de GPU y a cancel_matching
+
     if to_stop:
         # Fuera del lock y en hilo: stop() puede esperar la gracia del SIGTERM.
         # Mata el grupo entero (orquestador + separador). El worker limpia.
@@ -238,6 +241,36 @@ def cancel_job(jid, user=None):
 
     if revert:
         _revert_meta(revert[0], revert[1], was_cancelled=True)
+    return True
+
+
+_LIVE = ("queued", "running", "waiting_gpu")
+
+
+def count_active(user):
+    """Jobs vivos del usuario (cola + en marcha), para el tope por usuario."""
+    with _cond:
+        return sum(1 for j in _jobs.values()
+                   if j.get("user") == user and j["estado"] in _LIVE)
+
+
+def cancel_matching(user, h=None, timeout=60):
+    """Cancela los jobs vivos de user (de ese hash, o todos) y espera a que
+    el worker suelte el que corre: asi ya ha revertido la meta y matado el
+    proceso antes de que el llamador borre la carpeta. False si no da tiempo."""
+    with _cond:
+        ids = [jid for jid, j in _jobs.items()
+               if j.get("user") == user and (h is None or j.get("hash") == h)
+               and j["estado"] in _LIVE]
+    for jid in ids:
+        cancel_job(jid)
+    deadline = time.time() + timeout
+    with _cond:
+        while _current["job_id"] in ids:
+            left = deadline - time.time()
+            if left <= 0:
+                return False
+            _cond.wait(left)
     return True
 
 
@@ -358,7 +391,11 @@ def _wait_for_gpu(jid, min_vram_mb=None):
         if time.time() >= deadline:
             log.event("job.gpu_timeout", job_id=jid)
             return False
-        time.sleep(config.GPU_POLL_SEC)
+        with _cond:
+            _cond.wait(config.GPU_POLL_SEC)   # cancelar la despierta antes
+            job = _jobs.get(jid)
+            if not job or job["estado"] == "cancelled":
+                return False
         if gpu.vram_free_mb() >= min_vram_mb:
             with _cond:
                 job = _jobs.get(jid)
@@ -538,6 +575,7 @@ def _worker():
                 _current["job_id"] = None
                 _current["proc"] = None
                 _persist()                    # el job ya no esta vivo -> sale de queue.json
+                _cond.notify_all()            # cancel_matching espera esto
 
 
 def start_worker():

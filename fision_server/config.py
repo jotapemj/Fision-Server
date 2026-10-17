@@ -86,6 +86,9 @@ INCOMING_DIR.mkdir(parents=True, exist_ok=True)
 # ---------------------------------------------------------------- timeouts ----
 # Tope de un job (sin contar la espera de GPU). Al vencer se mata el grupo
 # de procesos entero y el job queda en error. Holgado para GPUs lentas / CPU.
+# Jobs vivos (cola + en marcha) por usuario. La GPU es una sola: sin tope,
+# un usuario podia llenar la cola. 0 = sin limite.
+MAX_JOBS_PER_USER = int(os.environ.get("FISION_MAX_JOBS_PER_USER", "3"))
 JOB_TIMEOUT_SEC = int(os.environ.get("FISION_JOB_TIMEOUT_SEC", "2400"))
 LYRICS_TIMEOUT_SEC = int(os.environ.get("FISION_LYRICS_TIMEOUT_SEC", "900"))
 
