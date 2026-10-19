@@ -1,17 +1,28 @@
-# Fision Server
+# FisionServer reference
 
-Self-hosted, multi-user server for audio stem separation and music analysis.
+Configuration, HTTP API, administration and deployment of the server. For the
+overview, installation and credits see the [README](../README.md).
 
-![Python](https://img.shields.io/badge/python-3.12-blue)
-![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
-![PyTorch](https://img.shields.io/badge/ML-PyTorch-ee4c2c)
-
-> This is the **server module** of Fision. For the processing pipeline, GUI, CLI,
-> model downloads and installation, see the **root repository README**.
+- [Overview](#overview)
+- [How it works](#how-it-works)
+- [On-disk layout](#on-disk-layout)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Authentication and user management](#authentication-and-user-management)
+- [API](#api)
+- [Hardware detection and GPU gating](#hardware-detection-and-gpu-gating)
+- [Avatars](#avatars)
+- [Playlists](#playlists)
+- [Lyrics](#lyrics)
+- [Logging](#logging)
+- [Versioning](#versioning)
+- [Deployment](#deployment)
+- [Roadmap](#roadmap)
 
 ## Overview
 
-Fision Server is the backend of Fision, a self-hosted alternative to cloud-based
+FisionServer is the backend of Fision, a self-hosted alternative to cloud-based
 stem-separation services. It receives audio from a client, runs the Fision
 pipeline (stem separation, beat/downbeat and chord detection, cover art and
 metronomes) and stores the results in a **per-user library** on the host, so they
@@ -72,7 +83,8 @@ data/
 ## Requirements
 
 The heavy stack (PyTorch with the CUDA index, `audio-separator`, `beat_this`,
-BTC, ffmpeg) is installed from the **root repository**. The server itself adds
+BTC, ffmpeg) is installed as described in the [README](../README.md#install).
+The server itself adds
 the following, pinned in the root `requirements.txt`:
 
 ```
@@ -132,7 +144,7 @@ All configuration is read from environment variables.
 | `FISION_CHORDS_CHANGE_COST` | `1.0`                 | Cost of a chord change. Higher = fewer, longer chords. |
 | `FISION_CHORDS_FAMILY_COST` | `0.2`                 | Cost of a change within the same root and triad (`C` to `C7`). |
 | `FISION_CHORDS_OFFBEAT_MULT` | `2.0`                | Multiplier on change costs away from the downbeat and half-bar. |
-| `FISION_MODELS_DIR`      | *(unset)*                | Single root for all model weights: `separator/`, `hf/` and `torch/` subdirectories. See *Model weights* in the main README. |
+| `FISION_MODELS_DIR`      | *(unset)*                | Single root for all model weights: `separator/`, `hf/` and `torch/` subdirectories. See [Model weights](../README.md#model-weights). |
 | `FISION_SEP_MODEL_DIR`   | `$FISION_MODELS_DIR/separator` or `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
 | `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
 | `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
@@ -675,10 +687,11 @@ service does not start before the disks are mounted.
 The token layer applies regardless of how the server is exposed; treat it as the
 inner wall and the network layer as the outer one.
 
-The server speaks plain HTTP. With the default `FISION_HOST=0.0.0.0` it also
-listens on the local network, where passwords and tokens travel unencrypted.
-Tailscale encrypts its own traffic; to accept connections only through it, set
-`FISION_HOST` to the machine's Tailscale address (`tailscale ip -4`).
+> [!WARNING]
+> The server speaks plain HTTP. With the default `FISION_HOST=0.0.0.0` it also
+> listens on the local network, where passwords and tokens travel unencrypted.
+> Tailscale encrypts its own traffic; to accept connections only through it,
+> set `FISION_HOST` to the machine's Tailscale address (`tailscale ip -4`).
 
 - **LAN only** - nothing to expose.
 - **Tailscale** - private mesh address, no public exposure (recommended).
@@ -699,4 +712,4 @@ Tailscale encrypts its own traffic; to accept connections only through it, set
 
 ## License
 
-AGPL-3.0. See [LICENSE](../LICENSE) in the repository root.
+AGPL-3.0. See [LICENSE](../LICENSE) and the [README](../README.md#license).
