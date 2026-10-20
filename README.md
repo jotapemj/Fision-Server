@@ -61,19 +61,12 @@ HTTP API, the admin panel and deployment as a systemd service.
 
 ## How it works
 
-```
-  ┌─────────────────┐       HTTP + Bearer token        ┌──────────────────────┐
-  │   Fision app    │  ──────────────────────────────► │    FisionServer      │
-  │    (Android)    │        (Tailscale / LAN)         │   FastAPI + queue    │
-  └─────────────────┘                                  └──────────┬───────────┘
-                                                                  │ subprocess
-                                                                  ▼
-                                                       ┌──────────────────────┐
-                                                       │   Fision pipeline    │
-                                                       │  separation + beats  │
-                                                       │  + chords (GPU)      │
-                                                       └──────────────────────┘
-```
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/readme/architecture-dark.svg">
+    <img src="./docs/readme/architecture-light.svg" width="860" alt="Fision architecture: the client app uploads audio over HTTP to FisionServer, which runs the pipeline as an isolated GPU process, one job at a time; the results go to the per-user library and the app downloads them as a zip.">
+  </picture>
+</div>
 
 * **Server** (`fision_server/`): accounts, job queue and the per-user
   library, where each song is stored under the hash of its audio.
