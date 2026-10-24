@@ -23,7 +23,7 @@ def _step(label, fn):
     try:
         fn()
     except Exception as e:
-        print(f"FALLO {label}: {e}")
+        print(f"FAILED {label}: {e}")
         return False
     print(f"ok {label}")
     return True
@@ -61,14 +61,14 @@ def main():
     from . import __version__
     print(f"Fision {__version__} - prefetch")
     for label, path in model_dirs().items():     # tambien aplica FISION_MODELS_DIR
-        print(f"   {label}: {path}")
-    results = [_step("separacion", fetch_separator),
+        print(f"   {label}: {config.shown_path(path)}")
+    results = [_step("separation", fetch_separator),
                _step("beat_this", fetch_beat_this),
                _step(f"Whisper {config.WHISPER_MODEL}", fetch_whisper)]
     if all(results):
-        print("\nTodo descargado.")
+        print("\nEverything downloaded.")
         sys.exit(0)
-    print("\nAlgo fallo: revisa la red y repite (lo ya bajado se conserva).")
+    print("\nSomething failed: check the network and run it again (finished downloads are kept).")
     sys.exit(1)
 
 

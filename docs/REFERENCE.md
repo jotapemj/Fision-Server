@@ -161,8 +161,8 @@ restart the server:
 - **systemd:** add or edit an `Environment=` line in the unit (or a drop-in
   created with `systemctl edit fision`), then run `systemctl daemon-reload`
   and `systemctl restart fision`. See `deploy/fision.service.example`.
-- **Docker / Compose:** edit the `environment:` section (or the `.env` file it
-  references) and recreate the container.
+- **Docker / Compose:** edit `.env` and run `docker compose up -d`, which
+  recreates the container. See [Docker](#docker).
 - **Manual start:** export the variable in the shell before
   `python -m fision_server.run`.
 
@@ -444,7 +444,7 @@ GET /server/info
   "gpu_problem": "",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.12.0"
+  "version": "1.13.0"
 }
 ```
 
@@ -748,6 +748,41 @@ sudo systemctl enable --now fision
 Keep `FISION_DATA`, `FISION_LIBRARY` and `FISION_MODELS_DIR` outside the
 repository checkout, and list their mount points in `RequiresMountsFor=` so the
 service does not start before the disks are mounted.
+
+### Docker
+
+`compose.yaml` runs the published image; installation and updates are
+described in the [README](../README.md#docker). Inside the container the
+paths are fixed (`/data`, `/library`, `/models`) and mapped to host folders
+through `FISION_DATA_PATH`, `FISION_LIBRARY_PATH` and `FISION_MODELS_PATH`.
+Every other variable in [Configuration](#configuration) goes in `.env`;
+`.env.example` lists the usual ones. Changes apply with `docker compose up -d`
+(`docker compose restart` keeps the old values).
+
+- **Paths shown:** the admin panel, `doctor`, `prefetch` and the account CLIs
+  show the host side of each volume next to the container path. In the
+  panel, paths and address appear under the `.env` variable that changes
+  them (`FISION_DATA_PATH`, `FISION_BIND`...). Compose passes the host side
+  as `FISION_DOCKER_*` variables, for display only.
+- **Permissions:** a data or library folder the container cannot write to
+  stops the server at startup with the `chown` command that fixes it.
+
+- **Commands:** the CLIs run inside the container, for example
+  `docker compose exec fision python -m fision_server.useradd alice`.
+- **Address:** `FISION_BIND` and `FISION_PUBLISH_PORT` choose where the port
+  is published on the host (`127.0.0.1:8000` by default). Docker adds its own
+  firewall rules, so a host firewall such as UFW does not filter a port
+  published on `0.0.0.0`.
+- **Client addresses:** connections made from the host itself reach the
+  server from the Docker bridge gateway, a private address inside
+  `FISION_ADMIN_ALLOW`. Publishing only on loopback or the Tailscale address
+  keeps the admin panel off other networks.
+- **User:** the image runs as UID/GID 1000, and the host folders must be
+  writable by it. `FISION_UID` and `FISION_GID` change it when building the
+  image locally.
+- **Logs:** `docker compose logs fision`, in UTC unless `TZ` is set.
+- **Without a GPU:** `docker compose -f compose.yaml -f compose.cpu.yaml up -d`
+  uses the CPU image and drops the GPU reservation.
 
 ### Network exposure
 

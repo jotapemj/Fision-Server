@@ -34,7 +34,8 @@ def main():
 
     # El CLI lee las mismas envs que el servicio: sin ellas miraria otra
     # biblioteca. Se muestra para que se vea.
-    print(f"biblioteca: {accounts.config.LIBRARY_DIR}   datos: {accounts.config.DATA_DIR}")
+    print(f"biblioteca: {accounts.config.shown_path(accounts.config.LIBRARY_DIR)}   "
+          f"datos: {accounts.config.shown_path(accounts.config.DATA_DIR)}")
     what = "y TODOS sus datos (biblioteca, playlists, avatar)" if purge         else "(sus datos NO se tocan)"
     ans = input(f"Borrar la cuenta '{name}' {what}? [s/N]: ")
     if ans.strip().lower() not in ("s", "si", "y", "yes"):

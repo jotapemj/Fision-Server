@@ -43,15 +43,27 @@ it.
 
 ## Getting started
 
-1. Install the server on a Linux machine with an NVIDIA GPU (see
+1. Start the server with Docker on a Linux machine with an NVIDIA GPU (see
    [Install](#install)). It also runs on the CPU, much slower.
-2. Check the installation with `python -m fision_server.doctor` and download
-   every model up front with `python -m fision_server.prefetch` (several GB).
+2. Check the installation and download every model up front (several GB):
+
+   ```bash
+   docker compose exec fision python -m fision_server.doctor
+   docker compose exec fision python -m fision_server.prefetch
+   ```
+
 3. Create the first account, which becomes the administrator:
-   `python -m fision_server.useradd <name>`.
-4. Start the server: `python -m fision_server.run`. It listens on port 8000.
-5. Install the [Fision app](https://github.com/jotapemj/FisionApp-Android) and
+
+   ```bash
+   docker compose exec fision python -m fision_server.useradd <name>
+   ```
+
+4. Install the [Fision app](https://github.com/jotapemj/FisionApp-Android) and
    sign in with the server address and the account.
+
+On a [native install](#native-install) the same commands run without the
+`docker compose exec fision` prefix, and `python -m fision_server.run`
+starts the server.
 
 > [!WARNING]
 > The server speaks plain HTTP. Reach it through
@@ -117,6 +129,84 @@ so it does not hold VRAM between jobs.
 </details>
 
 ## Install
+
+Docker is the recommended way: the image carries the validated Python,
+PyTorch and CUDA stack, so the host only needs the NVIDIA driver. The native
+install suits development and machines without Docker.
+
+### Docker
+
+Requirements:
+
+* Linux with the NVIDIA driver (575 or newer for `cu129`).
+* [Docker Engine](https://docs.docker.com/engine/install/) with Compose 2.24 or
+  newer (`docker compose version`).
+* [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
+  registered with `sudo nvidia-ctk runtime configure --runtime=docker`.
+* Disk: about 15 GB for the image (4 GB without a GPU), 6 GB for the model
+  weights, and room for the library. Docker keeps images under
+  `/var/lib/docker`, on the system disk; `data-root` in
+  `/etc/docker/daemon.json` moves them elsewhere.
+
+```bash
+git clone https://github.com/jotapemj/Fision-Server.git
+cd Fision-Server
+cp .env.example .env               # adjust if needed
+mkdir -p data library models
+docker compose up -d
+```
+
+The server listens on `127.0.0.1:8000`. Docker publishes ports past host
+firewalls such as UFW, so the default stays on loopback; `FISION_BIND` in
+`.env` sets the address, for example the one from `tailscale ip -4`. Logs go
+to `docker compose logs fision`, in UTC unless `TZ` is set.
+
+Accounts, library and model weights live in host folders, which survive any
+update of the image. By default they are `data`, `library` and `models` next
+to `compose.yaml`; `FISION_DATA_PATH`, `FISION_LIBRARY_PATH` and
+`FISION_MODELS_PATH` in `.env` move them, for example to another disk.
+Relative paths are resolved from the folder that holds `compose.yaml`.
+Inside the container they always appear as `/data`, `/library` and
+`/models`; the admin panel and `doctor` show both sides.
+
+> [!IMPORTANT]
+> Create the folders before the first start, as above. The container runs as
+> UID 1000, and a folder Docker creates on its own belongs to root. If the
+> server reports that it cannot write to a folder, give it to that user:
+> `sudo chown -R 1000:1000 <folder>`.
+
+Images are published for each GPU generation (see
+[Choosing the PyTorch index](#choosing-the-pytorch-index)), selected with
+`FISION_IMAGE_TAG`:
+
+* `cu129` (also `latest`): Turing and newer.
+* `cu126`: Maxwell, Pascal and Volta.
+* `cpu`: no NVIDIA GPU, started with
+  `docker compose -f compose.yaml -f compose.cpu.yaml up -d`.
+
+Each release is also tagged with its version, such as `1.13.0-cu129`.
+
+To update:
+
+```bash
+git pull
+docker compose pull
+docker compose up -d
+```
+
+After editing `.env`, apply it with `docker compose up -d`. `docker compose
+restart` keeps the old values.
+
+If `docker compose up` fails with `could not select device driver "nvidia"`,
+the NVIDIA Container Toolkit is missing or not registered with Docker. Without
+a GPU, use `compose.cpu.yaml` as shown above.
+
+To build the image locally instead, clone with `--recurse-submodules` (the
+BTC weights are needed) and run `docker compose build`. A build downloads
+several GB and needs about 40 GB of free disk; `docker builder prune`
+frees the build cache afterwards.
+
+### Native install
 
 ```bash
 # 1. Clone WITH submodules (BTC lives as a submodule, weights included)

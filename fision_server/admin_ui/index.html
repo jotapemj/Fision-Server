@@ -336,6 +336,7 @@ a.link svg { width: 16px; height: 16px; }
 // Textos en static/i18n.js. Idioma: el elegido en el panel; si no, el del
 // sistema; si no esta soportado, ingles.
 const DOCS = "https://github.com/jotapemj/Fision-Server/blob/main/docs/REFERENCE.md#changing-the-configuration";
+let DOCKER = false;   // lo dice /admin/api/overview
 
 const SUPPORTED = Object.keys(LANG_NAMES);
 function savedLang() { try { return localStorage.getItem("fision.lang"); } catch { return null; } }
@@ -486,12 +487,15 @@ const fail = () => setMain(`<div class="page"><div class="empty">${ico("cloud-of
 // Avisos de GPU: sonda de arranque (no utilizable) y VRAM baja
 function gpuWarnings(g) {
   const out = [];
-  if (g.gpu_problem) out.push(`${T.gpuProblem[g.gpu_problem] || g.gpu_problem} ${T.gpuHint}`);
+  // En Docker los comandos van dentro del contenedor
+  const hint = DOCKER ? T.gpuHint.replace("python -m", "docker compose exec fision python -m") : T.gpuHint;
+  if (g.gpu_problem) out.push(`${T.gpuProblem[g.gpu_problem] || g.gpu_problem} ${hint}`);
   if (g.gpu && g.gpu_usable !== false && g.vram_free_mb < g.vram_min_mb)
     out.push(T.vramLow(mb(g.vram_free_mb), mb(g.vram_min_mb)));
   return out;
 }
 function setStatus(o) {
+  DOCKER = !!o.docker;
   const s = $("#status"); if (!s) return;
   const warns = gpuWarnings(o.gpu), on = warns.length > 0;
   const why = warns.join(" ");
@@ -696,15 +700,18 @@ async function viewConfig() {
       <button class="help tap" id="cfgHelp" aria-label="${esc(T.cfgHelpTitle)}" title="${esc(T.cfgHelpTitle)}">?</button></div>
     ${groups.map(g => `<section class="grp"><h2>${esc(T.groups[g.id] || g.id)}</h2><div class="cfg">
       ${g.items.map(s => {
-        const val = s.secret ? (s.value === "env" ? T.secretEnv : s.value === "file" ? T.secretFile : "—") : (s.value || "—").replace(/,\s*/g, ", ");
-        return `<div class="cfg-row"><div><div class="d">${esc(DESC[s.var] || s.var)}</div><div class="k">${esc(s.var)}</div></div>
-          <div><div class="v">${esc(val)}</div><div class="src ${s.source === "env" ? "env" : ""}">${esc(s.source === "env" ? T.custom : s.source === "derived" ? T.derived : T.byDefault)}</div></div></div>`;
+        // Docker: se muestra el lado del host (lo que se edita en .env) y debajo el del contenedor
+        const shown = s.host_value || s.value;
+        const val = s.secret ? (s.value === "env" ? T.secretEnv : s.value === "file" ? T.secretFile : "—") : (shown || "—").replace(/,\s*/g, ", ");
+        const inner = s.host_value ? `<div class="src">${esc(T.inContainer)}: ${esc(s.value)}</div>` : "";
+        return `<div class="cfg-row"><div><div class="d">${esc(DESC[s.var] || s.var)}</div><div class="k">${esc(s.host_var || s.var)}</div></div>
+          <div><div class="v">${esc(val)}</div><div class="src ${s.source === "env" ? "env" : ""}">${esc(s.source === "env" ? T.custom : s.source === "derived" ? T.derived : T.byDefault)}</div>${inner}</div></div>`;
       }).join("")}</div></section>`).join("")}
   </div>`);
   $("#cfgHelp").addEventListener("click", () => dialog(`
     <div class="big">${ico("tune")}</div>
     <h3>${esc(T.cfgHelpTitle)}</h3>
-    <p>${esc(T.cfgHelpBody)}</p><p>${esc(T.cfgHelpHow)}</p>
+    <p>${esc(T.cfgHelpBody)}</p><p>${esc(d.docker ? T.cfgHelpDocker : T.cfgHelpHow)}</p>
     <p><a class="link" href="${DOCS}" target="_blank" rel="noopener">${esc(T.moreInfo)}${ico("open")}</a></p>
     <div class="acts"><button class="btn primary tap" data-close>${esc(T.accept)}</button></div>`));
 }

@@ -31,7 +31,8 @@ def main():
         print(f"error: el usuario '{name}' ya existe")
         sys.exit(1)
 
-    print(f"biblioteca: {accounts.config.LIBRARY_DIR}   datos: {accounts.config.DATA_DIR}")
+    print(f"biblioteca: {accounts.config.shown_path(accounts.config.LIBRARY_DIR)}   "
+          f"datos: {accounts.config.shown_path(accounts.config.DATA_DIR)}")
     left = accounts.leftovers(name)
     if left:
         # Restos de una cuenta borrada sin purgar: la nueva los heredaria

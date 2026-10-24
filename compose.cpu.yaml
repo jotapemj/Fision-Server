@@ -1,0 +1,11 @@
+# Without an NVIDIA GPU:
+#   docker compose -f compose.yaml -f compose.cpu.yaml up -d
+# Uses the CPU image and drops the GPU reservation. Processing is much slower.
+
+services:
+  fision:
+    image: ghcr.io/jotapemj/fision-server:cpu
+    build:
+      args:
+        TORCH_INDEX: cpu
+    deploy: !reset {}

@@ -140,6 +140,7 @@ def overview(admin: str = Depends(admin_user)):
     models = os.environ.get("FISION_MODELS_DIR", "").strip()
     return {
         "version": __version__,
+        "docker": config.IN_DOCKER,
         "uptime_sec": int(time.time() - _STARTED),
         "gpu": {**gpu.info(), "vram_free_mb": gpu.vram_free_mb(),
                 "vram_min_mb": config.GPU_MIN_VRAM_MB},
@@ -147,7 +148,7 @@ def overview(admin: str = Depends(admin_user)):
             "library_path": str(config.LIBRARY_DIR),
             "library_bytes": _cached_size(config.LIBRARY_DIR),
             "free_bytes": disk.free, "total_bytes": disk.total,
-            "models_path": models,
+            "models_path": (config.host_path(models) or models) if models else "",
             "models_bytes": _cached_size(models, ttl=600) if models else None,
         },
         "users": len(names),
@@ -461,4 +462,28 @@ def read_config(admin: str = Depends(admin_user)):
         out.append({"group": group, "var": var, "value": raw or default,
                     "default": default, "source": "env" if raw else "default",
                     "secret": False})
-    return {"settings": out}
+    return {"docker": config.IN_DOCKER, "settings": [_docker_view(s) for s in out]}
+
+
+# Docker: rutas y direccion se cambian en el .env del host, con otras variables
+_DOCKER_VARS = {
+    "FISION_DATA": ("FISION_DATA_PATH", "data", "./data"),
+    "FISION_LIBRARY": ("FISION_LIBRARY_PATH", "library", "./library"),
+    "FISION_MODELS_DIR": ("FISION_MODELS_PATH", "models", "./models"),
+    "FISION_HOST": ("FISION_BIND", "bind", "127.0.0.1"),
+    "FISION_PORT": ("FISION_PUBLISH_PORT", "port", "8000"),
+}
+
+
+def _docker_view(row):
+    """Añade el lado del host (host_var / host_value) a lo que lo tiene."""
+    if not config.IN_DOCKER:
+        return row
+    spec = _DOCKER_VARS.get(row["var"])
+    if spec:
+        host_var, key, default = spec
+        value = config.DOCKER_HOST[key]
+        return {**row, "host_var": host_var, "host_value": value,
+                "source": "default" if value == default else "env"}
+    host = config.host_path(row["value"]) if row["group"] == "paths" else None
+    return {**row, "host_value": host} if host else row

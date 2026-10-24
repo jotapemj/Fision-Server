@@ -7,6 +7,46 @@ import sys
 import secrets
 from pathlib import Path
 
+# Docker: compose pasa el otro lado de cada volumen y del puerto publicado,
+# solo para mostrarlo (panel, doctor, CLIs). Vacias fuera de Docker.
+DOCKER_HOST = {k: os.environ.get(f"FISION_DOCKER_{k.upper()}", "").strip()
+               for k in ("data", "library", "models", "bind", "port")}
+IN_DOCKER = bool(DOCKER_HOST["data"])
+_DOCKER_MOUNTS = (("/data", "data"), ("/library", "library"), ("/models", "models"))
+
+
+def host_path(path):
+    """Ruta en el host de una ruta del contenedor; None fuera de Docker."""
+    if not IN_DOCKER:
+        return None
+    p = str(path)
+    for inner, key in _DOCKER_MOUNTS:
+        if p == inner or p.startswith(inner + "/"):
+            return DOCKER_HOST[key].rstrip("/") + p[len(inner):]
+    return None
+
+
+def shown_path(path):
+    """Para mensajes: en Docker, la ruta del host y la del contenedor."""
+    host = host_path(path)
+    return f"{host} (container: {path})" if host else str(path)
+
+
+def ensure_dir(path):
+    """Crea la carpeta o sale con el arreglo (sin traceback: carpeta de root, etc.)."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write_test"
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError as e:
+        uid = os.getuid() if hasattr(os, "getuid") else None
+        fix = (f"sudo chown -R {uid}:{os.getgid()} {host_path(path)}" if IN_DOCKER
+               else "check the owner and permissions of the folder")
+        sys.exit(f"Fision cannot write to {shown_path(path)}: {e.strerror}.\n"
+                 f"Fix: {fix}")
+
+
 # Carpeta raiz de la biblioteca: una subcarpeta por hash de audio.
 # (Con multiusuario pasara a ser library/<user>/<hash>/ en el paso de aislamiento.)
 LIBRARY_DIR = Path(os.environ.get("FISION_LIBRARY", "./library")).resolve()
@@ -85,7 +125,7 @@ WHISPER_COMPUTE = os.environ.get("FISION_WHISPER_COMPUTE", "float16").strip()
 # GPU_MIN_VRAM_MB de separacion). large-v2/v3 en fp16 piden ~3 GB.
 WHISPER_MIN_VRAM_MB = int(os.environ.get("FISION_WHISPER_MIN_VRAM_MB", "3072"))
 
-LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+ensure_dir(LIBRARY_DIR)
 
 # Subidas a medias. Mismo disco que la biblioteca: mover = rename atomico y
 # sin pasar por /tmp (que puede ser tmpfs = RAM). Se vacia al arrancar.
@@ -105,7 +145,7 @@ LYRICS_TIMEOUT_SEC = int(os.environ.get("FISION_LYRICS_TIMEOUT_SEC", "900"))
 # Carpeta persistente para datos del servidor (users, clave de firma).
 # En Docker: montala como volumen, igual que library/.
 DATA_DIR = Path(os.environ.get("FISION_DATA", "./data")).resolve()
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+ensure_dir(DATA_DIR)
 
 USERS_FILE = DATA_DIR / "users.json"     # store de usuarios (hash de password)
 SECRET_FILE = DATA_DIR / "secret.key"    # clave para firmar tokens (auto-generada)

@@ -1,0 +1,54 @@
+# Fision server with Docker Compose.
+#
+#   cp .env.example .env        # adjust if needed
+#   mkdir -p data library models
+#   docker compose up -d
+#   docker compose exec fision python -m fision_server.doctor
+#
+# NVIDIA GPU: needs the driver and nvidia-container-toolkit on the host.
+# Without a GPU: docker compose -f compose.yaml -f compose.cpu.yaml up -d
+
+services:
+  fision:
+    image: ghcr.io/jotapemj/fision-server:${FISION_IMAGE_TAG:-cu129}
+    build:
+      context: .
+      args:
+        TORCH_INDEX: ${FISION_TORCH_INDEX:-cu129}
+        FISION_UID: ${FISION_UID:-1000}
+        FISION_GID: ${FISION_GID:-1000}
+    env_file:
+      - path: .env
+        required: false
+    # Rutas y puerto internos fijos: mandan sobre lo que traiga .env
+    environment:
+      FISION_DATA: /data
+      FISION_LIBRARY: /library
+      FISION_MODELS_DIR: /models
+      FISION_HOST: 0.0.0.0
+      FISION_PORT: "8000"
+      # Solo informativas: el panel, doctor y los CLI muestran el lado del host
+      FISION_DOCKER_DATA: ${FISION_DATA_PATH:-./data}
+      FISION_DOCKER_LIBRARY: ${FISION_LIBRARY_PATH:-./library}
+      FISION_DOCKER_MODELS: ${FISION_MODELS_PATH:-./models}
+      FISION_DOCKER_BIND: ${FISION_BIND:-127.0.0.1}
+      FISION_DOCKER_PORT: ${FISION_PUBLISH_PORT:-8000}
+    # Docker publica por encima del cortafuegos del host (UFW): por defecto
+    # solo loopback. Para Tailscale, FISION_BIND=<IP de tailscale ip -4>.
+    ports:
+      - "${FISION_BIND:-127.0.0.1}:${FISION_PUBLISH_PORT:-8000}:8000"
+    volumes:
+      - ${FISION_DATA_PATH:-./data}:/data
+      - ${FISION_LIBRARY_PATH:-./library}:/library
+      - ${FISION_MODELS_PATH:-./models}:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    init: true                 # recoge procesos huerfanos de los jobs
+    shm_size: 1gb              # el /dev/shm de 64 MB por defecto se queda corto para torch
+    stop_grace_period: 30s     # un job cancelado tiene 15 s para salir
+    restart: unless-stopped

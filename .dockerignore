@@ -1,0 +1,20 @@
+# Solo lo que el server necesita en la imagen
+.git
+.github
+.claude
+**/__pycache__
+**/*.pyc
+venv*
+.venv
+env
+data
+library
+models
+testing
+.env
+CLAUDE.md
+docs
+tools
+deploy
+Dockerfile
+compose*.yaml
