@@ -1,21 +1,23 @@
 # ==========================================================================
 # Fision - requirements
 #
-# Exact versions: this is the stack validated in production (Python 3.12,
-# Linux, RTX 3090). Upgrading any of them can change separation quality or
-# speed; do it deliberately and re-test.
+# Direct dependencies at the versions validated in production (Python 3.12,
+# Linux, RTX 3090). Every other package is pinned in constraints.txt.
+# Upgrading any of them can change separation quality or speed; do it
+# deliberately and re-test.
 #
-# Install PyTorch SEPARATELY, first, with the CUDA index that matches your GPU
-# (see "Install" in README.md). Installing torch from here would pull the
-# CPU build. Validated pair:
+# 1. Install PyTorch SEPARATELY, first, from the index that matches the GPU
+#    (see "Install" in README.md). It brings the CUDA 12 libraries that
+#    faster-whisper also uses. RTX 20xx and newer:
 #
-#   pip install torch==2.13.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130
+#   pip install torch==2.13.0 torchaudio==2.11.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu129
 #
-# THEN:  pip install -r requirements.txt
+# 2. THEN:  pip install -r requirements.txt -c constraints.txt
 #
 # System dependencies (not pip):
-#   sudo apt install ffmpeg python3-tk
-#   (ffmpeg -> audio-separator and pydub ; python3-tk -> the desktop GUI)
+#   sudo apt install ffmpeg python3-tk build-essential python3.12-dev
+#   (ffmpeg -> audio-separator and pydub ; python3-tk -> the desktop GUI ;
+#    build-essential and python3.12-dev -> madmom is compiled on install)
 # ==========================================================================
 
 # ---- Server (FastAPI) ----
@@ -41,13 +43,10 @@ beat-this @ git+https://github.com/CPJKU/beat_this.git@b95c8ab0c58c2d9fcfd40508a
 madmom @ git+https://github.com/CPJKU/madmom.git@27f032e8947204902c675e5e341a3faf5dc86dae
 
 # ---- Lyrics (Whisper via faster-whisper) ----
-# Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper.
+# Motor CTranslate2, mismos pesos oficiales de OpenAI Whisper. Sus wheels
+# son solo CUDA 12: usa el cuBLAS/cuDNN que trae torch (cu129/cu126). Nada de
+# pins nvidia-*-cu12 aqui: chocan con los de torch.
 faster-whisper==1.2.1
-# CTranslate2 no reutiliza cuBLAS/cuDNN de PyTorch: necesita los suyos (CUDA
-# 12, independientes del indice de torch). Wheels Linux y Windows. Quien corra
-# solo en CPU puede desinstalarlos (unos 500 MB) sin afectar al resto.
-nvidia-cublas-cu12==12.9.2.10
-nvidia-cudnn-cu12==9.25.0.15
 
 # ---- Audio / IO ----
 soundfile==0.14.0

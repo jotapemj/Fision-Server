@@ -1,0 +1,104 @@
+# ==========================================================================
+# Fision - constraints (lock)
+#
+# Exact versions of every package the stack pulls in, validated together on
+# the production server. Use it with requirements.txt:
+#
+#   pip install -r requirements.txt -c constraints.txt
+#
+# PyTorch and the NVIDIA/CUDA libraries are not listed: they come from the
+# PyTorch index chosen for the GPU (see "Install" in README.md).
+#
+# Regenerate after a validated upgrade, from the working environment:
+#   pip freeze | grep -viE '^(torch|torchaudio|torchvision|triton|nvidia-|cuda-|pip==)| @ ' > body
+# ==========================================================================
+
+absl-py==2.5.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.1
+argon2-cffi==25.1.0
+argon2-cffi-bindings==25.1.0
+audio-separator==0.44.3
+audioread==3.1.0
+av==18.0.0
+beartype==0.18.5
+certifi==2026.6.17
+cffi==2.1.0
+charset-normalizer==3.4.9
+click==8.4.2
+ctranslate2==4.8.1
+Cython==3.2.8
+decorator==5.3.1
+diffq==0.2.4
+einops==0.8.2
+fastapi==0.139.0
+faster-whisper==1.2.1
+filelock==3.29.7
+flatbuffers==25.12.19
+fsspec==2026.6.0
+h11==0.16.0
+hf-xet==1.5.2
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+huggingface_hub==1.24.0
+idna==3.18
+importlib_resources==7.1.0
+Jinja2==3.1.6
+joblib==1.5.3
+julius==0.2.8
+lazy-loader==0.5
+librosa==0.11.0
+llvmlite==0.48.0
+MarkupSafe==3.0.3
+mido==1.3.3
+mir_eval==0.8.2
+ml_collections==1.1.0
+ml_dtypes==0.5.4
+mpmath==1.3.0
+msgpack==1.2.1
+mutagen==1.48.1
+narwhals==2.23.0
+networkx==3.6.1
+numba==0.66.0
+numpy==2.4.6
+onnx-weekly==1.23.0.dev20260706
+onnx2torch-py313==1.6.0
+onnxruntime==1.27.0
+packaging==26.2
+pillow==12.3.0
+platformdirs==4.10.0
+pooch==1.9.0
+pretty_midi==0.2.11
+protobuf==7.35.1
+pycparser==3.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+pydub==0.25.1
+PyJWT==2.13.0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+PyYAML==6.0.3
+requests==2.34.2
+resampy==0.4.3
+rotary-embedding-torch==0.6.5
+samplerate==0.1.0
+scikit-learn==1.9.0
+scipy==1.18.0
+setuptools==83.0.0
+six==1.17.0
+soundfile==0.14.0
+soxr==1.1.0
+starlette==1.3.1
+sympy==1.14.0
+threadpoolctl==3.6.0
+tokenizers==0.23.1
+tqdm==4.68.4
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+urllib3==2.7.0
+uvicorn==0.51.0
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==16.0

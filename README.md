@@ -121,37 +121,46 @@ cd Fision-Server
 # (if cloned without --recurse-submodules)
 git submodule update --init --recursive
 
-# 2. Python 3.12 virtual environment
+# 2. System deps (not pip): audio, desktop GUI, and the compiler madmom needs
+sudo apt install ffmpeg python3-tk build-essential python3.12-dev
+
+# 3. Python 3.12 virtual environment
 python3.12 -m venv venv
 source venv/bin/activate            # Windows: venv\Scripts\activate
 
-# 3. System deps (not pip)
-sudo apt install ffmpeg python3-tk  # ffmpeg for audio; python3-tk for the GUI
+# 4. PyTorch FIRST, from the index for the GPU (see below)
+pip install torch==2.13.0 torchaudio==2.11.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu129
 
-# 4. PyTorch FIRST, with the CUDA index for the GPU (see below)
-pip install torch==2.13.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130
-
-# 5. Everything else
-pip install -r requirements.txt
+# 5. Everything else, at the validated versions
+pip install -r requirements.txt -c constraints.txt
 ```
 
 ### Choosing the PyTorch index
 
-The index depends on the GPU generation and the NVIDIA driver:
+The index depends on the GPU generation and the NVIDIA driver. All of them
+use CUDA 12, the version faster-whisper (lyrics) is built for, so PyTorch
+and Whisper share one set of CUDA libraries.
 
-* **`cu130`**: Turing and newer (RTX 20xx to 50xx), driver 580 or newer.
-* **`cu126`**: Maxwell, Pascal and Volta (GTX 9xx, GTX 10xx, V100), or an
-  older driver (560 or newer).
-* **`cpu`**: no NVIDIA GPU.
+* **`cu129`**: Turing and newer (RTX 20xx to 50xx), driver 575 or newer.
+  This is the validated configuration.
+* **`cu126`**: Maxwell, Pascal and Volta (GTX 9xx, GTX 10xx, V100), driver
+  560 or newer. Not tested on real hardware.
+* **`cpu`**: no NVIDIA GPU. Much slower.
 
-`cu130` wheels ship kernels for `sm_75` to `sm_120` only. Check the driver
-with `nvidia-smi` and the result with
-`python -c "import torch; print(torch.cuda.get_arch_list())"`. `torchaudio`
-stays at 2.11.0: no newer release exists, and only `beat_this` uses it.
+Check the driver with `nvidia-smi` and the result with
+`python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
+`torchaudio` stays at 2.11.0: no newer release exists, and only `beat_this`
+uses it.
 
-All other dependencies are pinned in `requirements.txt` to the validated
-stack. Whisper ships its own CUDA 12 libraries, independent of the PyTorch
-index.
+> [!NOTE]
+> On Pascal and older cards, set `FISION_WHISPER_COMPUTE=int8` and
+> `FISION_SEP_AUTOCAST=0`. These GPUs have no fast fp16: Whisper would fall
+> back to fp32, and the separator runs slower with autocast.
+
+`requirements.txt` lists the direct dependencies and `constraints.txt` pins
+everything else to the validated stack, so two installs made months apart
+get the same versions. Do not add `nvidia-*` packages by hand: PyTorch
+brings the CUDA libraries.
 
 ### Model weights
 

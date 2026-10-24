@@ -84,8 +84,8 @@ data/
 
 The heavy stack (PyTorch with the CUDA index, `audio-separator`, `beat_this`,
 BTC, ffmpeg) is installed as described in the [README](../README.md#install).
-The server itself adds
-the following, pinned in the root `requirements.txt`:
+The server itself adds the following, pinned in the root `requirements.txt`
+(transitive dependencies in `constraints.txt`):
 
 ```
 fastapi  uvicorn  python-multipart  mutagen  argon2-cffi  PyJWT
@@ -185,7 +185,9 @@ FISION_WHISPER_BATCH_SIZE=16
 `FISION_WHISPER_BATCH_SIZE >= 2` wraps the model with
 `BatchedInferencePipeline`; when unset (or `0`/`1`) Whisper runs in the
 classic single-batch mode. `FISION_SEP_AUTOCAST=0` forces fp32 in the
-separator (recommended on Pascal, where fp16 is slower).
+separator (recommended on Pascal, where fp16 is slower). On Pascal, also set
+`FISION_WHISPER_COMPUTE=int8`: Whisper has no fast fp16 there and would fall
+back to fp32.
 
 
 ## Authentication and user management
