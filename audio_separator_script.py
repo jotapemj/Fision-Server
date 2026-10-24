@@ -50,6 +50,18 @@ HTDEMUCS_FT     = "htdemucs_ft.yaml"                         # bass/drums/other 
 HTDEMUCS_6S     = "htdemucs_6s.yaml"                         # guitar/piano
 DRUMSEP         = "MDX23C-DrumSep-aufr33-jarredou.ckpt"      # kick/snare/toms/hh/ride/crash
 WINDS           = "17_HP-Wind_Inst-UVR.pth"                  # vientos / metales
+ALL_MODELS = (ROFORMER_VOCALS, KARAOKE, HTDEMUCS_FT, HTDEMUCS_6S, DRUMSEP, WINDS)
+
+
+def model_dir():
+    """Carpeta de pesos del separador.
+    Prioridad: FISION_SEP_MODEL_DIR > FISION_MODELS_DIR/separator > ~/.cache.
+    Nunca /tmp (el default de la lib): en tmpfs se pierden en cada reinicio."""
+    root = os.environ.get("FISION_MODELS_DIR", "").strip()
+    default = (os.path.join(root, "separator") if root
+               else "~/.cache/audio-separator-models")
+    return os.path.expanduser(
+        os.environ.get("FISION_SEP_MODEL_DIR", "").strip() or default)
 
 DRUM_PIECES = ["(kick)", "(snare)", "(toms)", "(hh)", "(ride)", "(crash)"]
 SILENCE_THRESHOLD = 1e-4   # por debajo de esto consideramos "silencio" -> se tira
@@ -196,22 +208,16 @@ def build_separator(output_dir):
                         not in ("0", "false", "False")
     demucs_shifts  = int(os.environ.get("FISION_DEMUCS_SHIFTS", "4"))
     demucs_overlap = float(os.environ.get("FISION_DEMUCS_OVERLAP", "0.5"))
-    # Pesos fuera de /tmp: en tmpfs se pierden en cada reinicio.
-    # Prioridad: FISION_SEP_MODEL_DIR > FISION_MODELS_DIR/separator > ~/.cache
-    models_root    = os.environ.get("FISION_MODELS_DIR", "").strip()
-    sep_default    = (os.path.join(models_root, "separator") if models_root
-                      else "~/.cache/audio-separator-models")
-    model_dir      = os.path.expanduser(
-        os.environ.get("FISION_SEP_MODEL_DIR", "").strip() or sep_default)
+    models      = model_dir()
 
     print(f"[sep] batch_size={batch_size} segment={segment_size} "
           f"overlap={overlap} autocast={autocast} "
           f"demucs_shifts={demucs_shifts} demucs_overlap={demucs_overlap} "
-          f"model_dir={model_dir}")
+          f"model_dir={models}")
 
     return Separator(
         output_dir=output_dir,
-        model_file_dir=model_dir,
+        model_file_dir=models,
         output_format="FLAC",
         use_autocast=autocast,
         mdxc_params={                  # RoFormer y DrumSep (MDXC)

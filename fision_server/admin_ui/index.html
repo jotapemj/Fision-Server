@@ -483,13 +483,21 @@ function setMain(html, quiet) {
 }
 const fail = () => setMain(`<div class="page"><div class="empty">${ico("cloud-off")}<div>${esc(T.offline)}</div></div></div>`);
 
+// Avisos de GPU: sonda de arranque (no utilizable) y VRAM baja
+function gpuWarnings(g) {
+  const out = [];
+  if (g.gpu_problem) out.push(`${T.gpuProblem[g.gpu_problem] || g.gpu_problem} ${T.gpuHint}`);
+  if (g.gpu && g.gpu_usable !== false && g.vram_free_mb < g.vram_min_mb)
+    out.push(T.vramLow(mb(g.vram_free_mb), mb(g.vram_min_mb)));
+  return out;
+}
 function setStatus(o) {
   const s = $("#status"); if (!s) return;
-  const low = o.gpu.gpu && o.gpu.vram_free_mb < o.gpu.vram_min_mb;
-  const why = low ? T.vramLow(mb(o.gpu.vram_free_mb), mb(o.gpu.vram_min_mb)) : "";
-  s.hidden = !low; s.innerHTML = low ? ico("warning") : "";
+  const warns = gpuWarnings(o.gpu), on = warns.length > 0;
+  const why = warns.join(" ");
+  s.hidden = !on; s.innerHTML = on ? ico("warning") : "";
   s.setAttribute("aria-label", why ? `${T.warnings}: ${why}` : "");
-  const bub = $("#bubble"); bub.textContent = why; if (!low) bub.hidden = true;
+  const bub = $("#bubble"); bub.textContent = why; if (!on) bub.hidden = true;
 }
 
 // ------------------------------------------------------------------ resumen ----
@@ -508,7 +516,7 @@ async function viewOverview(quiet) {
     j.queued && `${j.queued} ${T.queued}`].filter(Boolean).join(" · ") : T.idle;
   setMain(`<div class="page">
     <div class="page-head"><div><h1>${esc(T.nav.overview)}</h1></div></div>
-    ${low ? `<div class="banner">${ico("warning")}<div>${esc(T.vramLow(mb(g.vram_free_mb), mb(g.vram_min_mb)))}</div></div>` : ""}
+    ${gpuWarnings(g).map(w => `<div class="banner">${ico("warning")}<div>${esc(w)}</div></div>`).join("")}
     <section class="grp"><h2>${esc(T.server)}</h2><div class="cards">
       ${card("server", `Fision ${o.version}`, `<div class="s">${esc(T.uptime)} ${since(o.uptime_sec)}</div>`)}
       ${card("memory", g.gpu ? g.gpu_name : T.gpu,

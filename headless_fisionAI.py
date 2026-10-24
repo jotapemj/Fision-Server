@@ -33,6 +33,10 @@ def _apply_models_dir():
 
 _apply_models_dir()
 
+# Los tres checkpoints de beat_this (paper): mismo modelo, distinta semilla.
+# Tambien los usa prefetch para descargarlos.
+BEAT_THIS_CHECKPOINTS = ("final0", "final1", "final2")
+
 # Rutas del repo, no del directorio de trabajo: el server o un CLI lanzado
 # desde otra carpeta no encontraban los recursos.
 _HERE = Path(__file__).resolve().parent
@@ -226,8 +230,7 @@ def run_beats(input_file: str, output_dir: str):
     from beat_this.inference import Audio2Frames, Postprocessor, load_audio
 
     BEAT_THIS_DEVICE = "cpu"
-    # Los tres checkpoints del paper: mismo modelo, distinta semilla.
-    CHECKPOINTS = ("final0", "final1", "final2")
+    CHECKPOINTS = BEAT_THIS_CHECKPOINTS
 
     # Cargar audio una unica vez; cada modelo hace su forward sobre el mismo.
     signal, sr = load_audio(input_file)

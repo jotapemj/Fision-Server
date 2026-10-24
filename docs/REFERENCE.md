@@ -11,6 +11,7 @@ overview, installation and credits see the [README](../README.md).
 - [Configuration](#configuration)
 - [Authentication and user management](#authentication-and-user-management)
 - [API](#api)
+- [Diagnostics](#diagnostics)
 - [Hardware detection and GPU gating](#hardware-detection-and-gpu-gating)
 - [Avatars](#avatars)
 - [Playlists](#playlists)
@@ -97,6 +98,8 @@ fastapi  uvicorn  python-multipart  mutagen  argon2-cffi  PyJWT
 export FISION_LIBRARY="/path/to/library"     # result storage (default: ./library)
 export FISION_DATA="/path/to/data"           # accounts + keys (default: ./data)
 
+python -m fision_server.doctor               # check the installation
+python -m fision_server.prefetch             # download every model up front
 python -m fision_server.useradd alice        # first account (becomes administrator)
 python -m fision_server.run                  # start the server
 # or: uvicorn fision_server.app:app --host 0.0.0.0 --port 8000
@@ -391,6 +394,39 @@ It writes the stems (`.flac`) into `output_stems_dir` together with `beats.txt`,
 returns exit code 0 on success. All temporary output must stay inside the
 provided directory so interrupted runs can be cleaned up safely.
 
+## Diagnostics
+
+Two commands help set up and troubleshoot an installation. Run them with the
+same environment as the service; otherwise they look at `./data`, `./library`
+and `~/.cache` instead of the real folders (see
+[Authentication and user management](#authentication-and-user-management)).
+
+```bash
+python -m fision_server.doctor      # check the installation
+python -m fision_server.prefetch    # download every model up front
+```
+
+`doctor` prints one line per check, marked `OK`, `WARN` (works, worth a look)
+or `FAIL` (will not work), with the fix below each problem, and exits with
+`1` when anything fails. It covers:
+
+- Python version and `ffmpeg`.
+- The data, library and model folders: writable, and free space.
+- The GPU as seen by `nvidia-smi`, PyTorch and Whisper, with the codes of
+  [Hardware detection](#hardware-detection-and-gpu-gating); a PyTorch built
+  for a CUDA version other than 12, and leftovers such as `onnxruntime-gpu`
+  or two `nvidia-cudnn` packages.
+- The BTC weights (git submodule) and the metronome sample.
+- The separation, `beat_this` and Whisper weights that are not downloaded
+  yet.
+- Accounts: at least one user and one administrator.
+
+`prefetch` downloads the separation models, the `beat_this` checkpoints and
+the Whisper model set in `FISION_WHISPER_MODEL` (several GB) into the model
+folders. Without it, the first job downloads them and fails if the network
+drops. Files already present are skipped, so it can be run again after an
+interrupted download or a model change.
+
 ## Hardware detection and GPU gating
 
 The server is the single source of truth for GPU availability. At startup it
@@ -404,9 +440,11 @@ GET /server/info
   "gpu_name": "NVIDIA GeForce RTX 3060",
   "vram_total_mb": 12288,
   "driver": "550.54.15",
+  "gpu_usable": true,
+  "gpu_problem": "",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.11.5"
+  "version": "1.12.0"
 }
 ```
 
@@ -421,14 +459,39 @@ does not warm up CUDA.
 The `version` field carries the server's own release (see
 [Versioning](#versioning)).
 
+`nvidia-smi` only proves that a card is present. A driver that is too old, a
+CPU build of PyTorch or a GPU outside the architectures of the installed wheel
+would still send every job to the CPU. Right after startup the server
+therefore runs a probe in a separate process that imports PyTorch and
+CTranslate2 (Whisper) and checks that both can use CUDA. It takes a few
+seconds; until it finishes, `gpu_usable` is `null` and the `nvidia-smi` result
+applies. `gpu_problem` is empty or one of these stable codes:
+
+- `torch_error`: PyTorch cannot be imported.
+- `torch_no_cuda`: `nvidia-smi` sees a GPU but PyTorch does not (driver too
+  old, or the CPU build of PyTorch).
+- `arch_unsupported`: the GPU is not among the architectures of the installed
+  PyTorch (for example a Pascal card with the `cu129` index).
+- `whisper_no_cuda`: separation uses the GPU but Whisper cannot; lyrics run on
+  the CPU. `gpu_usable` stays `true`.
+- `smi_missing`: PyTorch sees CUDA but `nvidia-smi` is not available, so free
+  VRAM cannot be measured (typical of a container without the `utility`
+  capability).
+
+When `gpu_usable` is `false`, jobs that request `cuda` run on the CPU, the
+admin panel shows a warning and the `gpu.unusable` event is logged. Run
+`python -m fision_server.doctor` (see [Diagnostics](#diagnostics)) for the
+details and the fix.
+
 Jobs may include `"device": "cuda"` in the config. Before executing such a job
 the worker checks live free VRAM against `FISION_GPU_MIN_VRAM_MB` (default
 4096 MB). If not enough is free, the job moves to the `waiting_gpu` state,
 free VRAM is polled every `FISION_GPU_POLL_SEC` seconds (default 30), and the
 job resumes as soon as the threshold is met. If `FISION_GPU_WAIT_TIMEOUT_SEC`
 elapses (default 600), the job is aborted with `GPU ocupada`. If the host has
-no GPU at all, a job that requested `cuda` is silently downgraded to `cpu` so
-processing still completes.
+no usable GPU, a job that requested `cuda` is downgraded to `cpu` so
+processing still completes; the `job.gpu_fallback` event records the reason
+(`no_gpu` or the `gpu_problem` code).
 
 Job states exposed to clients: `queued`, `running`, `waiting_gpu`, `done`,
 `error`, `cancelled`. A `waiting_gpu` job counts as position `0` in the queue
@@ -609,6 +672,8 @@ prefixes are emitted:
 
 ```
 ... AUDIT  server.start gpu=True gpu_name=NVIDIA GeForce RTX 3060 vram_total_mb=12288
+... AUDIT  gpu.check usable=True torch=2.13.0+cu129 cuda=12.9 cudnn=92000 capability=8.6
+... AUDIT  gpu.unusable problem=torch_no_cuda
 ... AUDIT  user.create user=alice
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials

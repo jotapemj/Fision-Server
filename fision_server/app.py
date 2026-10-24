@@ -56,6 +56,7 @@ async def lifespan(app):
     info = gpu.info()
     log.event("server.start", gpu=info["gpu"], gpu_name=info["gpu_name"],
               vram_total_mb=info["vram_total_mb"])
+    gpu.start_probe()                 # torch/Whisper ven CUDA? (segundo plano)
     if not users.admins():
         # sin admin el panel /admin no tiene dueño: avisar como crearlo
         log.event("admin.missing",

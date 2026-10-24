@@ -45,10 +45,12 @@ it.
 
 1. Install the server on a Linux machine with an NVIDIA GPU (see
    [Install](#install)). It also runs on the CPU, much slower.
-2. Create the first account, which becomes the administrator:
+2. Check the installation with `python -m fision_server.doctor` and download
+   every model up front with `python -m fision_server.prefetch` (several GB).
+3. Create the first account, which becomes the administrator:
    `python -m fision_server.useradd <name>`.
-3. Start the server: `python -m fision_server.run`. It listens on port 8000.
-4. Install the [Fision app](https://github.com/jotapemj/FisionApp-Android) and
+4. Start the server: `python -m fision_server.run`. It listens on port 8000.
+5. Install the [Fision app](https://github.com/jotapemj/FisionApp-Android) and
    sign in with the server address and the account.
 
 > [!WARNING]
@@ -57,7 +59,9 @@ it.
 > from the internet.
 
 The [server reference](docs/REFERENCE.md) covers configuration, the
-HTTP API, the admin panel and deployment as a systemd service.
+HTTP API, the admin panel and deployment as a systemd service. When
+something does not work, `python -m fision_server.doctor` is the first step:
+it names the problem and the fix.
 
 ## How it works
 
@@ -217,11 +221,14 @@ before redistributing.
 **Separation and analysis**
 
 - [audio-separator](https://github.com/nomadkaraoke/python-audio-separator):
-  RoFormer, Demucs and MDX models. MIT.
+  RoFormer, Demucs and MDX models. MIT. The model weights are downloaded on
+  first use (or with `prefetch`) and keep the licenses set by their authors.
 - [beat_this](https://github.com/CPJKU/beat_this), Foscarin, Schlüter and
-  Widmer (CPJKU, ISMIR 2024): beats and downbeats. MIT.
+  Widmer (CPJKU, ISMIR 2024): beats and downbeats. MIT. Its checkpoints are
+  downloaded from CPJKU on first use.
 - [madmom](https://github.com/CPJKU/madmom), CPJKU / OFAI: Dynamic Bayesian
-  Network tracker. BSD 3-Clause.
+  Network tracker. Source code BSD 2-Clause. The model files bundled with
+  madmom (CC BY-NC-SA 4.0) are not used by Fision.
 - [BTC](https://github.com/jayg996/BTC-ISMIR19), Jonggwon Park et al., *A
   Bi-Directional Transformer for Musical Chord Recognition* (ISMIR 2019):
   chords, through a compatibility fork. MIT.

@@ -456,11 +456,12 @@ def _run_separation(job, lib):
     h = job["hash"]
     tmp_stems = lib.entry_dir(h) / "stems_tmp"
 
-    # Degrada silenciosamente si el cliente pidio cuda pero el server
-    # no tiene GPU (o la deteccion fallo). El pipeline sigue en CPU.
-    if _wants_gpu(job["config"]) and not gpu.has_gpu():
+    # Degrada a CPU si el cliente pidio cuda pero el server no tiene GPU o
+    # no se puede usar (sonda de arranque). El motivo queda en el evento.
+    if _wants_gpu(job["config"]) and not gpu.usable():
         job["config"] = _force_cpu(job["config"])
-        log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
+        log.event("job.gpu_fallback", job_id=jid,
+                  reason=gpu.info()["gpu_problem"] or "no_gpu")
 
     # Gate de VRAM: si el job pide cuda, espera a tener libre >= minimo.
     if _wants_gpu(job["config"]):
@@ -513,7 +514,7 @@ def _run_lyrics(job, lib):
 
     # Elegir device: si el server no tiene GPU, degradamos a CPU/int8 igual
     # que hace la separacion. Si la tiene, pasamos por el gate de VRAM.
-    if gpu.has_gpu():
+    if gpu.whisper_usable():
         if not _wait_for_gpu(jid, min_vram_mb=config.WHISPER_MIN_VRAM_MB):
             if _jobs.get(jid, {}).get("estado") == "cancelled":
                 raise RuntimeError("cancelado")
@@ -523,7 +524,8 @@ def _run_lyrics(job, lib):
     else:
         device = "cpu"
         compute = "int8"
-        log.event("job.gpu_fallback", job_id=jid, reason="no_gpu")
+        log.event("job.gpu_fallback", job_id=jid,
+                  reason=gpu.info()["gpu_problem"] or "no_gpu")
 
     if job["estado"] == "cancelled":
         raise RuntimeError("cancelado")
