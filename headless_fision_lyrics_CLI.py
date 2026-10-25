@@ -6,7 +6,7 @@ Wrapper FINO sobre `headless_fisionAI.run_lyrics`. Se usa en dos escenarios:
 
 - Como subprocess del servidor: cuando el usuario pide letra desde la app,
   el server lo lanza sobre el vocals.flac vigente de la biblioteca.
-- Manual, para usuarios de la GUI/CLI principales que quieran generar la
+- Manual, para usuarios del CLI principal que quieran generar la
   letra sobre stems ya procesados.
 
 Uso:
@@ -32,15 +32,15 @@ from headless_fisionAI import run_lyrics
 
 def main():
     p = argparse.ArgumentParser(
-        description="Fision AI - transcripcion de letra sobre voz aislada")
-    p.add_argument("vocals", help="vocals.flac (o cualquier audio de voz)")
-    p.add_argument("output_dir", help="Carpeta donde escribir lyrics.json")
+        description="Fision AI - lyrics transcription of an isolated vocal track")
+    p.add_argument("vocals", help="vocals.flac (or any vocal audio)")
+    p.add_argument("output_dir", help="Folder where lyrics.json is written")
     p.add_argument("language", nargs="?", default=None,
-                   help="Codigo ISO (en/es/fr/...). 'auto' o ausente -> auto-detect.")
+                   help="ISO code (en/es/fr/...). 'auto' or missing -> auto-detect.")
     p.add_argument("--model", default="large-v2",
-                   help="Checkpoint de faster-whisper (large-v2 por defecto)")
+                   help="faster-whisper checkpoint (large-v2 by default)")
     p.add_argument("--device", default="cuda", choices=["cpu", "cuda"],
-                   help="Procesador para la inferencia")
+                   help="Device for inference")
     p.add_argument("--compute", default="float16",
                    help="compute_type: float16 (GPU), int8 (CPU), float32...")
     args = p.parse_args()
@@ -50,7 +50,7 @@ def main():
         language = None
 
     if not os.path.isfile(args.vocals):
-        print(f"[lyrics-CLI] ERROR: no existe el fichero {args.vocals}",
+        print(f"[lyrics-CLI] ERROR: file not found: {args.vocals}",
               file=sys.stderr)
         sys.exit(1)
 
@@ -67,7 +67,7 @@ def main():
         print(f"\n[lyrics-CLI] ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("\nLyrics generadas correctamente ✔")
+    print("\nLyrics generated ✔")
     sys.exit(0)
 
 

@@ -100,7 +100,7 @@ def run_metadata_extractor(input_file: str, output_dir: str):
         with open(ruta_txt, "w", encoding="utf-8") as f:
             f.write(f"Artist: {artista}\n")
             f.write(f"Title: {titulo}\n")
-        print(f"Metadata file save in {output_dir}")
+        print(f"Metadata file saved in {output_dir}")
     except Exception as e:
         print(f"Error writing metadata.txt: {e}")
 
@@ -707,7 +707,7 @@ def run_lyrics(vocals_path, output_dir, language=None,
             from faster_whisper import BatchedInferencePipeline
             pipeline = BatchedInferencePipeline(model=model)
         except Exception as e:
-            print(f"[whisper] BatchedInferencePipeline no disponible ({e}); "
+            print(f"[whisper] BatchedInferencePipeline not available ({e}); "
                   f"cayendo a mono-batch")
             pipeline = None
 
@@ -1018,7 +1018,7 @@ def analyze_chords_file(chord_file_dir: str):
         basic_path = os.path.join(chord_file_dir, "chords_basic.txt")
 
         if not os.path.isfile(input_path):
-            raise FileNotFoundError(f"No existe: {input_path}")
+            raise FileNotFoundError(f"Not found: {input_path}")
 
         # --- Paso 1: generar basico desde el CRUDO ---
         with open(input_path, "r", encoding="utf-8") as f:
@@ -1042,8 +1042,8 @@ def analyze_chords_file(chord_file_dir: str):
         _cast_file_to_musglyphs(input_path)
         _cast_file_to_musglyphs(basic_path)
 
-        print(f"[chords] Casteado: {input_path}")
-        print(f"[chords_basic] Generado y casteado: {basic_path}")
+        print(f"[chords] Converted: {input_path}")
+        print(f"[chords_basic] Generated and converted: {basic_path}")
 
     except Exception as e:
         print(f"[chords] ERROR: {e}")
@@ -1062,7 +1062,7 @@ def _gpu_visible():
         return False
         
 def _write_sep_config(output_dir, sep_config):
-    """Vuelca el dict de la GUI a un JSON que lee audio_separator_script.py."""
+    """Vuelca el sep_config a un JSON que lee audio_separator_script.py."""
     import json
     cfg_path = str(Path(output_dir) / "sep_config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -1081,7 +1081,7 @@ def start_audio_separator(input_file, output_dir, sep_config, device="cpu"):
         env["CUDA_VISIBLE_DEVICES"] = "-1"   # CPU de verdad
 
     mode = sep_config.get("mode", "?")
-    print(f"Lanzando audio-separator ({mode}, {device}) en segundo plano...")
+    print(f"Starting audio-separator ({mode}, {device}) in the background...")
     return subprocess.Popen(cmd, env=env)
 
 
@@ -1089,10 +1089,10 @@ def run_audio_separator(input_file, output_dir, sep_config, device="cpu", on_pro
     """Version BLOQUEANTE (modo serie). Lanza y espera; revienta si falla."""
     proc = start_audio_separator(input_file, output_dir, sep_config, device)
     if on_proc:
-        on_proc(proc)        # la GUI lo guarda para poder cancelar
+        on_proc(proc)        # el server lo guarda para poder cancelar
     ret = proc.wait()
     if ret != 0:
-        raise RuntimeError(f"Audio-Separator fallo (codigo {ret})")
+        raise RuntimeError(f"Audio-Separator failed (exit code {ret})")
 
 # ---------- MAIN PIPELINE ----------
 def run_pipeline(input_file: str, output_dir: str, device: str = "cpu",
@@ -1105,14 +1105,14 @@ def run_pipeline(input_file: str, output_dir: str, device: str = "cpu",
         sep_config = {"mode": "classic", "preset": "2stem", "sep_mode": 2,
                       "vocals": "single"}
 
-    print("=== Obteining metadata ===")
+    print("=== Obtaining metadata ===")
     run_metadata_extractor(input_file, output_dir)
 
     # Paralelo solo con GPU real: separacion (GPU) + beats (CPU) a la vez.
     paralelo = (device == "cuda") and _gpu_visible()
 
     if paralelo:
-        print(f"=== Audio-Separator ({sep_config.get('mode')}) [GPU] + beat_this [CPU] paralelo ===")
+        print(f"=== Audio-Separator ({sep_config.get('mode')}) [GPU] + beat_this [CPU] in parallel ===")
         proc = start_audio_separator(input_file, output_dir, sep_config, device)
         if on_proc:
             on_proc(proc)                   # para poder cancelar
@@ -1121,10 +1121,10 @@ def run_pipeline(input_file: str, output_dir: str, device: str = "cpu",
         finally:
             ret = proc.wait()                   # esperamos siempre a la separacion
         if ret != 0:
-            raise RuntimeError(f"Audio-Separator fallo (codigo {ret})")
-        print("Audio-Separator terminado.")
+            raise RuntimeError(f"Audio-Separator failed (exit code {ret})")
+        print("Audio-Separator finished.")
     else:
-        print(f"=== Audio-Separator ({sep_config.get('mode')}) [serie] ===")
+        print(f"=== Audio-Separator ({sep_config.get('mode')}) [serial] ===")
         spinner = Spinner("Running Audio-Separator Pipeline")
         spinner.start()
         try:

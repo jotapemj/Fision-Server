@@ -51,9 +51,9 @@ def ensure_dir(path):
 # (Con multiusuario pasara a ser library/<user>/<hash>/ en el paso de aislamiento.)
 LIBRARY_DIR = Path(os.environ.get("FISION_LIBRARY", "./library")).resolve()
 
-# Usuario por defecto para el guardado LOCAL (GUI/CLI en tu maquina, un solo
+# Usuario por defecto para el guardado LOCAL (CLI en tu maquina, un solo
 # dueño). El servidor NUNCA usa esto: siempre pasa el user real del token.
-# Ponlo a tu username (ej. "jp") para que GUI local y nube compartan biblioteca.
+# Ponlo a tu username (ej. "jp") para que CLI local y nube compartan biblioteca.
 LOCAL_USER = os.environ.get("FISION_LOCAL_USER", "local").strip().lower()
 
 # --- DEPRECADO -------------------------------------------------------------

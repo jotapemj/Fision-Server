@@ -132,7 +132,7 @@ def login(body: LoginIn, request: Request):
     wait, scope = ratelimit.retry_after(ip, name)
     if wait:
         log.event("login.blocked", user=name or "-", ip=ip, scope=scope)
-        raise HTTPException(status_code=429, detail="Demasiados intentos",
+        raise HTTPException(status_code=429, detail="Too many attempts",
                             headers={"Retry-After": str(wait)})
     # verify() siempre: con usuario inexistente gasta lo mismo (hash señuelo)
     if users.verify(name, body.password):
@@ -142,7 +142,7 @@ def login(body: LoginIn, request: Request):
         return {"token": token, "user": name, "expires_at": exp.isoformat()}
     ratelimit.fail(ip, name)
     log.event("login.fail", user=name or "-", reason="bad_credentials")
-    raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+    raise HTTPException(status_code=401, detail="Wrong username or password")
 
 
 @app.post("/auth/refresh")
@@ -164,7 +164,7 @@ class ChangePwIn(BaseModel):
 def change_password(body: ChangePwIn, user: str = Depends(current_user)):
     if not users.verify(user, body.old_password):
         log.event("password_change.fail", user=user, reason="bad_old_password")
-        raise HTTPException(status_code=403, detail="Contraseña actual incorrecta")
+        raise HTTPException(status_code=403, detail="Wrong current password")
     try:
         users.set_password(user, body.new_password)
     except ValueError as e:
@@ -179,7 +179,7 @@ def change_password(body: ChangePwIn, user: str = Depends(current_user)):
 def avatar_get(user: str = Depends(current_user)):
     p = avatars.path_for(user)
     if not p:
-        raise HTTPException(404, "Sin avatar")
+        raise HTTPException(404, "No avatar")
     return FileResponse(p, media_type=avatars.media_type(p.suffix))
 
 
@@ -199,7 +199,7 @@ async def _save_image(file: UploadFile):
             size += len(chunk)
             if size > limit:
                 tmp.close(); os.remove(tmp.name)
-                raise HTTPException(413, "Imagen demasiado grande")
+                raise HTTPException(413, "Image too large")
             tmp.write(chunk)
     finally:
         tmp.close()
@@ -207,7 +207,7 @@ async def _save_image(file: UploadFile):
     ext = avatars.sniff_ext(head)
     if not ext:
         os.remove(tmp.name)
-        raise HTTPException(400, "Formato no soportado (usa JPEG/PNG/WebP)")
+        raise HTTPException(400, "Unsupported format (use JPEG, PNG or WebP)")
     return tmp.name, ext
 
 
@@ -229,17 +229,17 @@ def avatar_delete(user: str = Depends(current_user)):
 
 # ---------------------------------------------------------------- helpers ----
 def _public_meta(m):
-    return {"hash": m.get("hash"), "nombre": m.get("nombre"),
+    return {"hash": m.get("hash"), "filename": m.get("filename"),
             "title": m.get("title"), "artist": m.get("artist"),
             "cover_url": m.get("cover_url"),
-            "estado": m.get("estado"), "config": m.get("config"),
+            "state": m.get("state"), "config": m.get("config"),
             "created_at": m.get("created_at"),
             "updated_at": m.get("updated_at")}
 
 
 def _require_hash(h):
     if not library.valid_hash(h):
-        raise HTTPException(404, "No existe")
+        raise HTTPException(404, "Not found")
 
 
 # Formatos que decodifica el pipeline (ffmpeg). Resto -> 415 sin escribir nada.
@@ -252,16 +252,16 @@ def _parse_cfg(config_json):
     try:
         cfg = json.loads(config_json or "{}")
     except ValueError:
-        raise HTTPException(400, "config_json no es JSON valido")
+        raise HTTPException(400, "config_json is not valid JSON")
     if not isinstance(cfg, dict):
-        raise HTTPException(400, "config_json debe ser un objeto")
+        raise HTTPException(400, "config_json must be an object")
     return cfg
 
 
 async def _save_upload(file: UploadFile):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in AUDIO_EXTS:
-        raise HTTPException(415, "Formato de audio no soportado")
+        raise HTTPException(415, "Unsupported audio format")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext,
                                       dir=config.INCOMING_DIR)
     size = 0
@@ -273,7 +273,7 @@ async def _save_upload(file: UploadFile):
             size += len(chunk)
             if size > config.MAX_UPLOAD_MB * 1024 * 1024:
                 tmp.close(); os.remove(tmp.name)
-                raise HTTPException(413, "Archivo demasiado grande")
+                raise HTTPException(413, "File too large")
             tmp.write(chunk)
     finally:
         tmp.close()
@@ -283,7 +283,7 @@ async def _save_upload(file: UploadFile):
 # -------------------------------------------------------------------- jobs ----
 def _job_running(live):
     return JSONResponse(status_code=409, content={
-        "detail": "La cancion ya se esta procesando", "code": "job_running",
+        "detail": "The song is already being processed", "code": "job_running",
         "job_id": live["job_id"]})
 
 
@@ -293,7 +293,7 @@ def _job_limit_hit(user):
     if lim > 0 and jobs.count_active(user) >= lim:
         log.event("job.limit", user=user, limit=lim)
         return JSONResponse(status_code=429, content={
-            "detail": f"Maximo {lim} trabajos en cola por usuario", "code": "job_limit"})
+            "detail": f"At most {lim} queued jobs per user", "code": "job_limit"})
     return None
 
 
@@ -315,26 +315,26 @@ def _enqueue_upload(user, tmp_path, ext, filename, cfg):
     if os.path.getsize(tmp_path) == 0:
         os.remove(tmp_path)
         return JSONResponse(status_code=400, content={
-            "detail": "Archivo vacio", "code": "audio_empty"})
+            "detail": "Empty file", "code": "audio_empty"})
     secs = _audio_seconds(tmp_path)
     if secs is not None and secs < config.MIN_AUDIO_SEC:
         # Sin cabecera legible se deja pasar: decide el pipeline
         os.remove(tmp_path)
         return JSONResponse(status_code=400, content={
-            "detail": f"Audio demasiado corto (minimo {config.MIN_AUDIO_SEC} s)",
+            "detail": f"Audio too short (minimum {config.MIN_AUDIO_SEC} s)",
             "code": "audio_too_short"})
     h = library.hash_file(tmp_path)
     meta = lib.read_meta(h)                        # cache hit dentro de SU biblioteca
-    if meta and meta.get("estado") == "listo" and meta.get("config") == cfg:
+    if meta and meta.get("state") == "ready" and meta.get("config") == cfg:
         os.remove(tmp_path)
-        return {"hash": h, "estado": "listo", "cached": True}
+        return {"hash": h, "state": "ready", "cached": True}
     live = jobs.find_active(user, h)
     if live:
         # Ya se esta procesando: misma config -> el mismo job; otra -> 409
         os.remove(tmp_path)
         if live["config"] == cfg:
             return {"hash": h, "job_id": live["job_id"],
-                    "estado": live["estado"], "cached": False}
+                    "state": live["state"], "cached": False}
         return _job_running(live)
     limited = _job_limit_hit(user)
     if limited:
@@ -343,7 +343,7 @@ def _enqueue_upload(user, tmp_path, ext, filename, cfg):
     lib.save_input(h, tmp_path, ext)
     job = jobs.create_job(user, h, filename or h, cfg, reprocess=bool(meta))
     return {"hash": h, "job_id": job["job_id"],
-            "estado": job["estado"], "cached": False}
+            "state": job["state"], "cached": False}
 
 
 @app.post("/jobs")
@@ -361,7 +361,7 @@ def reprocess(h: str, config_json: str = Form("{}"),
     _require_hash(h)
     lib = library.for_user(user)
     if not lib.exists(h) or lib.input_path(h) is None:
-        raise HTTPException(404, "No existe ese audio")
+        raise HTTPException(404, "Audio not found")
     cfg = _parse_cfg(config_json)
     live = jobs.find_active(user, h)
     if live:
@@ -370,8 +370,8 @@ def reprocess(h: str, config_json: str = Form("{}"),
     if limited:
         return limited
     meta = lib.read_meta(h) or {}
-    job = jobs.create_job(user, h, meta.get("nombre", h), cfg, reprocess=True)
-    return {"hash": h, "job_id": job["job_id"], "estado": job["estado"]}
+    job = jobs.create_job(user, h, meta.get("filename", h), cfg, reprocess=True)
+    return {"hash": h, "job_id": job["job_id"], "state": job["state"]}
 
 
 @app.get("/jobs")
@@ -383,16 +383,17 @@ def jobs_active(user: str = Depends(current_user)):
 def job_status(jid: str, user: str = Depends(current_user)):
     job = jobs.get_job(jid, user)
     if not job:
-        raise HTTPException(404, "Job no encontrado")
-    return {"job_id": jid, "hash": job["hash"], "estado": job["estado"],
-            "posicion": jobs.queue_position(jid, user), "error": job["error"]}
+        raise HTTPException(404, "Job not found")
+    return {"job_id": jid, "hash": job["hash"], "state": job["state"],
+            "position": jobs.queue_position(jid, user), "error": job["error"],
+            "error_code": job["error_code"]}
 
 
 @app.delete("/jobs/{jid}")
 def job_cancel(jid: str, user: str = Depends(current_user)):
     if not jobs.cancel_job(jid, user):
-        raise HTTPException(404, "No cancelable")
-    return {"job_id": jid, "estado": "cancelled"}
+        raise HTTPException(404, "Job not found or not cancellable")
+    return {"job_id": jid, "state": "cancelled"}
 
 
 # ----------------------------------------------------------------- library ----
@@ -406,7 +407,7 @@ def lib_get(h: str, user: str = Depends(current_user)):
     _require_hash(h)
     m = library.for_user(user).read_meta(h)
     if not m:
-        raise HTTPException(404, "No existe")
+        raise HTTPException(404, "Not found")
     return _public_meta(m)
 
 
@@ -415,9 +416,9 @@ def lib_zip(h: str, user: str = Depends(current_user)):
     _require_hash(h)
     lib = library.for_user(user)
     if not lib.zip_path(h).exists():
-        raise HTTPException(404, "Sin resultado listo")
+        raise HTTPException(404, "No result ready")
     m = lib.read_meta(h) or {}
-    base = os.path.splitext(m.get("nombre") or h)[0]
+    base = os.path.splitext(m.get("filename") or h)[0]
     return FileResponse(lib.zip_path(h), media_type="application/zip",
                         filename=f"{base}_stems.zip")
 
@@ -426,11 +427,11 @@ def lib_zip(h: str, user: str = Depends(current_user)):
 def lib_stem_file(h: str, filename: str, user: str = Depends(current_user)):
     _require_hash(h)
     if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
-        raise HTTPException(400, "Nombre invalido")
+        raise HTTPException(400, "Invalid file name")
     base = library.for_user(user).stems_dir(h).resolve()
     target = (base / filename).resolve()
     if target.parent != base or not target.is_file():
-        raise HTTPException(404, "No existe")
+        raise HTTPException(404, "Not found")
     if filename == "artcover.png":
         # Se llama .png pero son los bytes de la tag tal cual (a menudo JPEG)
         with open(target, "rb") as f:
@@ -445,16 +446,16 @@ def lib_delete(h: str, user: str = Depends(current_user)):
     _require_hash(h)
     lib = library.for_user(user)
     if not lib.exists(h):
-        raise HTTPException(404, "No existe")
+        raise HTTPException(404, "Not found")
     # Antes de borrar: fuera sus jobs, y espera a que el worker suelte el que
     # corre (si no, al fallar reescribia meta.json y la cancion "volvia")
     if not jobs.cancel_matching(user, h):
-        raise HTTPException(409, "La cancion sigue procesandose; reintenta")
+        raise HTTPException(409, "The song is still being processed; try again")
     lib.delete_entry(h)
     n = playlists.remove_song(user, h)        # fuera de la nube = fuera de playlists
     if n:
         log.event("playlist.song_removed", user=user, hash=h[:12], playlists=n)
-    return {"hash": h, "borrado": True}
+    return {"hash": h, "deleted": True}
 
 
 # ------------------------------------------------------------- playlists ----
@@ -470,7 +471,7 @@ def _pl_error(e):
 
 def _require_pid(pid):
     if not playlists.valid_id(pid):
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
 
 
 @app.get("/playlists")
@@ -493,7 +494,7 @@ def pl_get(pid: str, user: str = Depends(current_user)):
     _require_pid(pid)
     p = playlists.get(user, pid)
     if not p:
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
     return p
 
 
@@ -505,7 +506,7 @@ def pl_update(pid: str, body: PlaylistIn, user: str = Depends(current_user)):
     except playlists.PlaylistError as e:
         return _pl_error(e)
     if not p:
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
     log.event("playlist.update", user=user, id=pid, songs=p["count"])
     return p
 
@@ -514,7 +515,7 @@ def pl_update(pid: str, body: PlaylistIn, user: str = Depends(current_user)):
 def pl_delete(pid: str, user: str = Depends(current_user)):
     _require_pid(pid)
     if not playlists.delete(user, pid):
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
     log.event("playlist.delete", user=user, id=pid)
     return {"ok": True}
 
@@ -524,7 +525,7 @@ def pl_cover_get(pid: str, user: str = Depends(current_user)):
     _require_pid(pid)
     p = playlists.cover_path(user, pid)
     if not p:
-        raise HTTPException(404, "Sin cover")
+        raise HTTPException(404, "No cover")
     return FileResponse(p, media_type=avatars.media_type(p.suffix))
 
 
@@ -535,7 +536,7 @@ async def pl_cover_put(pid: str, file: UploadFile = File(...),
     tmp_name, ext = await _save_image(file)
     if not playlists.save_cover(user, pid, tmp_name, ext):
         os.remove(tmp_name)
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
     log.event("playlist.cover_set", user=user, id=pid)
     return {"ok": True}
 
@@ -544,7 +545,7 @@ async def pl_cover_put(pid: str, file: UploadFile = File(...),
 def pl_cover_delete(pid: str, user: str = Depends(current_user)):
     _require_pid(pid)
     if not playlists.get(user, pid):
-        raise HTTPException(404, "Playlist no encontrada")
+        raise HTTPException(404, "Playlist not found")
     playlists.delete_cover(user, pid)
     log.event("playlist.cover_delete", user=user, id=pid)
     return {"ok": True}
@@ -571,24 +572,24 @@ def lyrics_start(h: str, body: LyricsIn, user: str = Depends(current_user)):
         lang = None
     if lang and not _LANG_RE.match(lang):
         # va como argumento al CLI: solo codigos ISO, nada que parezca una opcion
-        raise HTTPException(400, "language debe ser un codigo ISO (es, en...) o auto")
+        raise HTTPException(400, "language must be an ISO code (es, en...) or auto")
     lib = library.for_user(user)
     if not lib.exists(h):
-        raise HTTPException(404, "No existe")
+        raise HTTPException(404, "Not found")
     vocals = lib.stems_dir(h) / "vocals.flac"
     if not vocals.exists():
-        raise HTTPException(409, "vocals.flac no disponible todavia; espera a "
-                                 "que termine el job principal")
+        raise HTTPException(409, "vocals.flac not available yet; wait for "
+                                 "the main job to finish")
     if jobs.has_active_lyrics(user, h):
-        raise HTTPException(409, "Ya hay un job de lyrics en curso para esta cancion")
+        raise HTTPException(409, "A lyrics job is already running for this song")
 
     limited = _job_limit_hit(user)
     if limited:
         return limited
     m = lib.read_meta(h) or {}
-    job = jobs.create_job(user, h, m.get("nombre", h),
+    job = jobs.create_job(user, h, m.get("filename", h),
                           {"language": lang}, reprocess=False, kind="lyrics")
-    return {"job_id": job["job_id"], "hash": h, "estado": job["estado"]}
+    return {"job_id": job["job_id"], "hash": h, "state": job["state"]}
 
 
 @app.get("/library/{h}/lyrics")
@@ -596,7 +597,7 @@ def lyrics_get(h: str, user: str = Depends(current_user)):
     _require_hash(h)
     p = library.for_user(user).stems_dir(h) / "lyrics.json"
     if not p.exists():
-        raise HTTPException(404, "Sin lyrics")
+        raise HTTPException(404, "No lyrics")
     return FileResponse(p, media_type="application/json")
 
 

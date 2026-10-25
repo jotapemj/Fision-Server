@@ -14,10 +14,10 @@ PERSISTENCIA / RECUPERACION (caida a medias):
   cambio. Solo campos ligeros; el audio ya esta en disco (input.<ext>).
 - Al arrancar, recover():
     1. Reencola los jobs que quedaron a medias (limpia su stems_tmp/).
-    2. Si un job ya se habia completado antes del crash (meta listo, misma
+    2. Si un job ya se habia completado antes del crash (meta ready, misma
        config), lo salta (no reprocesa).
-    3. Barre metas huerfanas en "procesando" que no esten en la cola y las
-       revierte (listo si hay resultado vigente, si no error).
+    3. Barre metas huerfanas en "processing" que no esten en la cola y las
+       revierte (ready si hay resultado vigente, si no error).
 - El historial de jobs terminados NO se persiste (es efimero): tras un reinicio
   /jobs/{id} da 404 y la app debe mirar /library/{hash} (meta = fuente de verdad).
 
@@ -56,18 +56,18 @@ def _describe(lib, h, name):
 
 
 # ------------------------------------------------------------ persistencia ----
-_PERSIST_KEYS = ("job_id", "user", "hash", "nombre", "config", "reprocess", "kind")
+_PERSIST_KEYS = ("job_id", "user", "hash", "filename", "config", "reprocess", "kind")
 
 
 def _persist():
     """Vuelca la cola viva (running + queued) a queue.json. Llamar con el lock."""
     items = []
     cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
-    if cur and cur["estado"] in ("running", "waiting_gpu"):
+    if cur and cur["state"] in ("running", "waiting_gpu"):
         items.append({k: cur.get(k) for k in _PERSIST_KEYS})
     for jid in _pending:
         j = _jobs.get(jid)
-        if j and j["estado"] == "queued":
+        if j and j["state"] == "queued":
             items.append({k: j.get(k) for k in _PERSIST_KEYS})
     tmp = Path(str(config.QUEUE_FILE) + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -97,9 +97,9 @@ def create_job(user, audio_hash, name, cfg, reprocess=False, kind="separation"):
     de stems/ y punto. La meta principal solo la mueven jobs de separacion.
     """
     jid = uuid.uuid4().hex[:12]
-    job = {"job_id": jid, "user": user, "hash": audio_hash, "nombre": name,
-           "config": cfg, "estado": "queued", "error": "", "creado": _now(),
-           "reprocess": reprocess, "kind": kind}
+    job = {"job_id": jid, "user": user, "hash": audio_hash, "filename": name,
+           "config": cfg, "state": "queued", "error": "", "error_code": "",
+           "created_at": _now(), "reprocess": reprocess, "kind": kind}
     with _cond:
         _jobs[jid] = job
         _pending.append(jid)
@@ -107,14 +107,14 @@ def create_job(user, audio_hash, name, cfg, reprocess=False, kind="separation"):
         _cond.notify()
 
     # La meta de la biblioteca solo la tocan los jobs de separacion. Un job
-    # de lyrics no altera el estado "listo" del resultado principal.
+    # de lyrics no altera el estado "ready" del resultado principal.
     if kind == "separation":
         lib = library.for_user(user)
         now = _now()
         meta = lib.read_meta(audio_hash) or {"hash": audio_hash}
         meta.setdefault("created_at", now)
-        meta.update({"nombre": name, "config": cfg,
-                     "estado": "procesando", "updated_at": now})
+        meta.update({"filename": name, "config": cfg,
+                     "state": "processing", "updated_at": now})
         meta.update(_describe(lib, audio_hash, name))
         lib.write_meta(audio_hash, meta)
     return job
@@ -125,7 +125,7 @@ def find_active(user, audio_hash, kind="separation"):
     with _cond:
         for j in _jobs.values():
             if (j.get("kind", "separation") == kind and j.get("user") == user
-                    and j.get("hash") == audio_hash and j["estado"] in _LIVE):
+                    and j.get("hash") == audio_hash and j["state"] in _LIVE):
                 return dict(j)
     return None
 
@@ -139,7 +139,7 @@ def has_active_lyrics(user, audio_hash):
             if (j.get("kind") == "lyrics"
                     and j.get("user") == user
                     and j.get("hash") == audio_hash
-                    and j["estado"] in ("queued", "running", "waiting_gpu")):
+                    and j["state"] in ("queued", "running", "waiting_gpu")):
                 return True
     return False
 
@@ -161,14 +161,14 @@ def queue_position(jid, user=None):
         job = _jobs.get(jid)
         if not _owned(job, user):
             return None
-        if job["estado"] in ("running", "waiting_gpu"):
+        if job["state"] in ("running", "waiting_gpu"):
             return 0
-        if job["estado"] != "queued":
+        if job["state"] != "queued":
             return None
         pos = 0
         for pid in _pending:
             pj = _jobs.get(pid)
-            if pj and pj["estado"] == "queued":
+            if pj and pj["state"] == "queued":
                 pos += 1
                 if pid == jid:
                     return pos
@@ -180,19 +180,19 @@ def list_active(user):
     with _cond:
         out = []
         cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
-        if cur and cur["estado"] in ("running", "waiting_gpu") and cur.get("user") == user:
+        if cur and cur["state"] in ("running", "waiting_gpu") and cur.get("user") == user:
             out.append({"job_id": cur["job_id"], "hash": cur["hash"],
-                        "nombre": cur["nombre"], "estado": cur["estado"],
-                        "posicion": 0})
+                        "filename": cur["filename"], "state": cur["state"],
+                        "position": 0})
         pos = 0
         for pid in _pending:
             j = _jobs.get(pid)
-            if j and j["estado"] == "queued":
+            if j and j["state"] == "queued":
                 pos += 1
                 if j.get("user") == user:
                     out.append({"job_id": j["job_id"], "hash": j["hash"],
-                                "nombre": j["nombre"], "estado": "queued",
-                                "posicion": pos})
+                                "filename": j["filename"], "state": "queued",
+                                "position": pos})
         return out
 
 
@@ -201,22 +201,22 @@ def list_all_active():
     with _cond:
         out = []
         cur = _jobs.get(_current["job_id"]) if _current["job_id"] else None
-        if cur and cur["estado"] in ("running", "waiting_gpu"):
+        if cur and cur["state"] in ("running", "waiting_gpu"):
             out.append({"job_id": cur["job_id"], "user": cur["user"],
-                        "hash": cur["hash"], "nombre": cur["nombre"],
+                        "hash": cur["hash"], "filename": cur["filename"],
                         "kind": cur.get("kind", "separation"),
-                        "estado": cur["estado"], "posicion": 0,
-                        "creado": cur.get("creado", "")})
+                        "state": cur["state"], "position": 0,
+                        "created_at": cur.get("created_at", "")})
         pos = 0
         for pid in _pending:
             j = _jobs.get(pid)
-            if j and j["estado"] == "queued":
+            if j and j["state"] == "queued":
                 pos += 1
                 out.append({"job_id": j["job_id"], "user": j["user"],
-                            "hash": j["hash"], "nombre": j["nombre"],
+                            "hash": j["hash"], "filename": j["filename"],
                             "kind": j.get("kind", "separation"),
-                            "estado": "queued", "posicion": pos,
-                            "creado": j.get("creado", "")})
+                            "state": "queued", "position": pos,
+                            "created_at": j.get("created_at", "")})
         return out
 
 
@@ -228,12 +228,12 @@ def cancel_job(jid, user=None):
         job = _jobs.get(jid)
         if not _owned(job, user):
             return False
-        if job["estado"] == "queued":
-            job["estado"] = "cancelled"
+        if job["state"] == "queued":
+            job.update(state="cancelled", error="cancelled", error_code="cancelled")
             revert = (job["user"], job["hash"])
             _persist()
-        elif job["estado"] in ("running", "waiting_gpu") and _current["job_id"] == jid:
-            job["estado"] = "cancelled"
+        elif job["state"] in ("running", "waiting_gpu") and _current["job_id"] == jid:
+            job["state"] = "cancelled"
             # Si estaba en waiting_gpu no hay proc: el bucle de espera detecta
             # el cambio a "cancelled" y sale limpio.
             to_stop = _current["proc"]
@@ -261,7 +261,7 @@ def count_active(user):
     """Jobs vivos del usuario (cola + en marcha), para el tope por usuario."""
     with _cond:
         return sum(1 for j in _jobs.values()
-                   if j.get("user") == user and j["estado"] in _LIVE)
+                   if j.get("user") == user and j["state"] in _LIVE)
 
 
 def cancel_matching(user, h=None, timeout=60):
@@ -271,7 +271,7 @@ def cancel_matching(user, h=None, timeout=60):
     with _cond:
         ids = [jid for jid, j in _jobs.items()
                if j.get("user") == user and (h is None or j.get("hash") == h)
-               and j["estado"] in _LIVE]
+               and j["state"] in _LIVE]
     for jid in ids:
         cancel_job(jid)
     deadline = time.time() + timeout
@@ -291,10 +291,10 @@ def _revert_meta(user, h, was_cancelled):
     meta = lib.read_meta(h) or {"hash": h}
     meta.setdefault("created_at", now)
     if lib.zip_path(h).exists():
-        estado = "listo"
+        state = "ready"
     else:
-        estado = "cancelado" if was_cancelled else "error"
-    meta.update({"estado": estado, "updated_at": now})
+        state = "cancelled" if was_cancelled else "error"
+    meta.update({"state": state, "updated_at": now})
     lib.write_meta(h, meta)
 
 
@@ -313,7 +313,7 @@ def recover():
             lib = library.for_user(j["user"])
             # ya completado antes del crash (mismo config)? no reprocesar
             meta = lib.read_meta(j["hash"])
-            if meta and meta.get("estado") == "listo" and meta.get("config") == j["config"]:
+            if meta and meta.get("state") == "ready" and meta.get("config") == j["config"]:
                 known.add((j["user"], j["hash"]))
                 continue
             kind = j.get("kind") or "separation"
@@ -323,9 +323,10 @@ def recover():
             # cayo a medias, en el peor caso deja un lyrics.json parcial que
             # el reintento sobreescribe atomicamente.
             job = {"job_id": j["job_id"], "user": j["user"], "hash": j["hash"],
-                   "nombre": j.get("nombre") or j["hash"], "config": j["config"],
-                   "estado": "queued", "error": "", "creado": _now(),
-                   "reprocess": j.get("reprocess", True), "kind": kind}
+                   "filename": j.get("filename") or j["hash"], "config": j["config"],
+                   "state": "queued", "error": "", "error_code": "",
+                   "created_at": _now(), "reprocess": j.get("reprocess", True),
+                   "kind": kind}
             _jobs[job["job_id"]] = job
             _pending.append(job["job_id"])
             known.add((j["user"], j["hash"]))
@@ -337,7 +338,7 @@ def recover():
     for user in library.list_user_dirs():
         lib = library.for_user(user)
         for meta in lib.list_entries():
-            if meta.get("estado") == "procesando" and (user, meta.get("hash")) not in known:
+            if meta.get("state") == "processing" and (user, meta.get("hash")) not in known:
                 lib.discard_tmp(meta["hash"])
                 _revert_meta(user, meta["hash"], was_cancelled=False)
                 swept += 1
@@ -386,9 +387,9 @@ def _wait_for_gpu(jid, min_vram_mb=None):
     deadline = time.time() + config.GPU_WAIT_TIMEOUT_SEC
     with _cond:
         job = _jobs.get(jid)
-        if not job or job["estado"] == "cancelled":
+        if not job or job["state"] == "cancelled":
             return False
-        job["estado"] = "waiting_gpu"
+        job["state"] = "waiting_gpu"
         _persist()
     log.event("job.waiting_gpu", job_id=jid)
 
@@ -396,7 +397,7 @@ def _wait_for_gpu(jid, min_vram_mb=None):
         # Cancelacion durante la espera -> salir limpio.
         with _cond:
             job = _jobs.get(jid)
-            if not job or job["estado"] == "cancelled":
+            if not job or job["state"] == "cancelled":
                 return False
         if time.time() >= deadline:
             log.event("job.gpu_timeout", job_id=jid)
@@ -404,17 +405,29 @@ def _wait_for_gpu(jid, min_vram_mb=None):
         with _cond:
             _cond.wait(config.GPU_POLL_SEC)   # cancelar la despierta antes
             job = _jobs.get(jid)
-            if not job or job["estado"] == "cancelled":
+            if not job or job["state"] == "cancelled":
                 return False
         if gpu.vram_free_mb() >= min_vram_mb:
             with _cond:
                 job = _jobs.get(jid)
-                if not job or job["estado"] == "cancelled":
+                if not job or job["state"] == "cancelled":
                     return False
-                job["estado"] = "running"
+                job["state"] = "running"
                 _persist()
             log.event("job.gpu_ready", job_id=jid)
             return True
+
+
+def _cancelled():
+    return pipeline.JobError("cancelled", "cancelled")
+
+
+def _raise_wait_failed(jid):
+    """La espera de GPU no llego: cancelado o sin VRAM a tiempo."""
+    if _jobs.get(jid, {}).get("state") == "cancelled":
+        raise _cancelled()
+    raise pipeline.JobError("gpu_busy", "GPU busy: not enough free VRAM after "
+                            f"{config.GPU_WAIT_TIMEOUT_SEC} s")
 
 
 # ----------------------------------------------------------------- worker ----
@@ -423,7 +436,7 @@ def _next_job():
         while True:
             while _pending:
                 head = _jobs.get(_pending[0])
-                if not head or head["estado"] != "queued":
+                if not head or head["state"] != "queued":
                     _pending.pop(0)
                 else:
                     break
@@ -466,23 +479,21 @@ def _run_separation(job, lib):
     # Gate de VRAM: si el job pide cuda, espera a tener libre >= minimo.
     if _wants_gpu(job["config"]):
         if not _wait_for_gpu(jid, min_vram_mb=config.GPU_MIN_VRAM_MB):
-            if _jobs.get(jid, {}).get("estado") == "cancelled":
-                raise RuntimeError("cancelado")
-            raise RuntimeError("GPU ocupada")
+            _raise_wait_failed(jid)
 
     if tmp_stems.exists():
         shutil.rmtree(tmp_stems)
 
     inp = lib.input_path(h)
     if inp is None:
-        raise RuntimeError("no hay input para este hash")
+        raise pipeline.JobError("input_missing", "no input audio for this hash")
 
     pipeline.process(
         inp, tmp_stems, job["config"],
         on_proc=lambda p: _current.__setitem__("proc", p))
 
-    if job["estado"] == "cancelled":
-        raise RuntimeError("cancelado")
+    if job["state"] == "cancelled":
+        raise _cancelled()
 
     # Al reprocesar, preserva lyrics.json vigente antes del swap atomico.
     if job.get("reprocess"):
@@ -492,9 +503,9 @@ def _run_separation(job, lib):
     now = _now()
     meta = lib.read_meta(h) or {"hash": h}
     meta.setdefault("created_at", now)
-    meta.update({"estado": "listo", "config": job["config"],
-                 "nombre": job["nombre"], "updated_at": now})
-    meta.update(_describe(lib, h, job["nombre"]))
+    meta.update({"state": "ready", "config": job["config"],
+                 "filename": job["filename"], "updated_at": now})
+    meta.update(_describe(lib, h, job["filename"]))
     lib.write_meta(h, meta)
 
 
@@ -510,15 +521,14 @@ def _run_lyrics(job, lib):
     h = job["hash"]
     vocals = lib.stems_dir(h) / "vocals.flac"
     if not vocals.exists():
-        raise RuntimeError("vocals.flac no disponible; procesa la cancion primero")
+        raise pipeline.JobError("vocals_missing",
+                                "vocals.flac not available; process the song first")
 
     # Elegir device: si el server no tiene GPU, degradamos a CPU/int8 igual
     # que hace la separacion. Si la tiene, pasamos por el gate de VRAM.
     if gpu.whisper_usable():
         if not _wait_for_gpu(jid, min_vram_mb=config.WHISPER_MIN_VRAM_MB):
-            if _jobs.get(jid, {}).get("estado") == "cancelled":
-                raise RuntimeError("cancelado")
-            raise RuntimeError("GPU ocupada")
+            _raise_wait_failed(jid)
         device = config.WHISPER_DEVICE
         compute = config.WHISPER_COMPUTE
     else:
@@ -527,8 +537,8 @@ def _run_lyrics(job, lib):
         log.event("job.gpu_fallback", job_id=jid,
                   reason=gpu.info()["gpu_problem"] or "no_gpu")
 
-    if job["estado"] == "cancelled":
-        raise RuntimeError("cancelado")
+    if job["state"] == "cancelled":
+        raise _cancelled()
 
     lang = None
     if isinstance(job.get("config"), dict):
@@ -545,7 +555,7 @@ def _worker():
         jid = _next_job()
         with _cond:
             job = _jobs.get(jid)
-        if not job or job["estado"] == "cancelled":
+        if not job or job["state"] == "cancelled":
             with _cond:
                 _persist()
             continue
@@ -555,7 +565,7 @@ def _worker():
         kind = job.get("kind") or "separation"
         lib = library.for_user(user)
         with _cond:
-            job["estado"] = "running"
+            job["state"] = "running"
             _current["job_id"] = jid
             _current["proc"] = None
             _persist()                        # queda registrado como 'running'
@@ -566,16 +576,19 @@ def _worker():
             else:
                 _run_separation(job, lib)
 
-            if job["estado"] == "cancelled":
-                raise RuntimeError("cancelado")
-            job["estado"] = "done"
+            if job["state"] == "cancelled":
+                raise _cancelled()
+            job["state"] = "done"
 
         except Exception as e:
             if isinstance(e, pipeline.JobTimeout):
                 log.event("job.timeout", job_id=jid, kind=kind)
-            was_cancelled = job["estado"] == "cancelled"
-            job["estado"] = "cancelled" if was_cancelled else "error"
-            job["error"] = str(e)
+            was_cancelled = job["state"] == "cancelled"
+            job["state"] = "cancelled" if was_cancelled else "error"
+            # Cancelar gana a cualquier otro fallo (el proceso muere a medias)
+            job["error"] = "cancelled" if was_cancelled else str(e)
+            job["error_code"] = ("cancelled" if was_cancelled
+                                 else getattr(e, "code", "internal"))
             if kind == "separation":
                 tmp_stems = lib.entry_dir(h) / "stems_tmp"
                 shutil.rmtree(tmp_stems, ignore_errors=True)

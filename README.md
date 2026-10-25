@@ -39,7 +39,7 @@ it.
   previous result.
 * **Shared GPU queue** that waits for free VRAM and survives restarts.
 * **Admin panel** in the browser, in 10 languages.
-* **Desktop GUI and command line** to run the pipeline without the server.
+* **Command line** to run the pipeline without the server.
 
 ## Getting started
 
@@ -87,8 +87,7 @@ it names the problem and the fix.
 * **Server** (`fision_server/`): accounts, job queue and the per-user
   library, where each song is stored under the hash of its audio.
 * **Pipeline** (`headless_fisionAI.py`): the audio work, run as an isolated
-  process per job. The server, the GUI and the CLI all call the same
-  pipeline.
+  process per job. The server and the CLI call the same pipeline.
 
 <details>
 <summary><b>The pipeline in detail</b></summary>
@@ -184,7 +183,7 @@ Images are published for each GPU generation (see
 * `cpu`: no NVIDIA GPU, started with
   `docker compose -f compose.yaml -f compose.cpu.yaml up -d`.
 
-Each release is also tagged with its version, such as `1.13.0-cu129`.
+Each release is also tagged with its version, such as `2.0.0-cu129`.
 
 To update:
 
@@ -215,8 +214,8 @@ cd Fision-Server
 # (if cloned without --recurse-submodules)
 git submodule update --init --recursive
 
-# 2. System deps (not pip): audio, desktop GUI, and the compiler madmom needs
-sudo apt install ffmpeg python3-tk build-essential python3.12-dev
+# 2. System deps (not pip): audio and the compiler madmom needs
+sudo apt install ffmpeg build-essential python3.12-dev
 
 # 3. Python 3.12 virtual environment
 python3.12 -m venv venv
@@ -279,16 +278,9 @@ Without it, each library keeps its usual default under `~/.cache`.
 
 The pipeline also runs on its own, for quick tests or a single song.
 
-**Desktop GUI.** Runs the pipeline on one file. By default it writes to a
-plain folder; the *save like the server* option stores the result in the
-library instead (`FISION_LIBRARY`, owner `FISION_LOCAL_USER`). It needs a
-graphical environment.
-
-```bash
-python headless_fisionAI_gui.py
-```
-
-**Command line.**
+**Command line.** Runs the pipeline on one file. By default it writes to a
+plain folder; `--save-server` stores the result in the library instead
+(`FISION_LIBRARY`, owner `FISION_LOCAL_USER`).
 
 ```bash
 python headless_fision_CLI.py <input_audio> <output_dir> [config.json] [--device cpu|cuda]

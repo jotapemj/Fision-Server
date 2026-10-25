@@ -29,10 +29,10 @@ async def current_user(authorization: str = Header(default="")) -> str:
     token = bearer_token(authorization)
     if not token:
         log.event("auth.reject", reason="missing", user="-")
-        raise HTTPException(status_code=401, detail="No autenticado")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     user, reason = security.check(token)
     if reason:
         # el motivo diagnostica sin adivinar (caducado, revocado...)
         log.event("auth.reject", reason=reason, user=user or "-")
-        raise HTTPException(status_code=401, detail="No autenticado")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return user

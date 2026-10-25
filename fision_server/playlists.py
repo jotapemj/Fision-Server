@@ -75,17 +75,17 @@ def _clean(user, title, songs):
     title = (title or "").strip()
     if not 1 <= len(title) <= MAX_TITLE:
         raise PlaylistError("title_length",
-                            f"El titulo debe tener entre 1 y {MAX_TITLE} caracteres")
+                            f"The title must have 1 to {MAX_TITLE} characters")
     if not isinstance(songs, list) or len(songs) > MAX_SONGS:
-        raise PlaylistError("song_limit", f"Maximo {MAX_SONGS} canciones")
+        raise PlaylistError("song_limit", f"At most {MAX_SONGS} songs")
     if len(set(songs)) != len(songs):
-        raise PlaylistError("song_duplicate", "Cancion repetida en la playlist")
+        raise PlaylistError("song_duplicate", "Song repeated in the playlist")
     lib = library.for_user(user)
     for h in songs:
         # Solo canciones en la nube del propio usuario
         if not (isinstance(h, str) and library.valid_hash(h) and lib.exists(h)):
             raise PlaylistError("song_not_found",
-                                f"Cancion no encontrada en tu biblioteca: {h}")
+                                f"Song not found in your library: {h}")
     return title, songs
 
 
@@ -152,7 +152,7 @@ def create(user, title, songs):
     with _lock:
         data = _load(user)
         if len(data) >= MAX_PLAYLISTS:
-            raise PlaylistError("playlist_limit", f"Maximo {MAX_PLAYLISTS} playlists")
+            raise PlaylistError("playlist_limit", f"At most {MAX_PLAYLISTS} playlists")
         pid = uuid.uuid4().hex[:12]
         now = _now()
         data[pid] = {"id": pid, "title": title, "songs": songs,

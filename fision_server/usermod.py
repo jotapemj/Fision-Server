@@ -13,7 +13,7 @@ from . import users, log
 
 def main():
     if len(sys.argv) != 3 or sys.argv[2] not in ("--admin", "--no-admin"):
-        print("uso: python -m fision_server.usermod <username> --admin|--no-admin")
+        print("usage: python -m fision_server.usermod <username> --admin|--no-admin")
         sys.exit(1)
     name, flag = sys.argv[1], sys.argv[2] == "--admin"
 
@@ -24,7 +24,7 @@ def main():
         sys.exit(1)
 
     log.event("user.role", user=name, role="admin" if flag else "user", by="cli")
-    print(f"OK: '{name}' {'ahora es administrador' if flag else 'ya no es administrador'}.")
+    print(f"OK: '{name}' {'is now an administrator' if flag else 'is no longer an administrator'}.")
 
 
 if __name__ == "__main__":

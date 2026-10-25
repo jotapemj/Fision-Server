@@ -59,7 +59,7 @@ def main(file_path, carpeta):
         std = checkpoint['std']
         model.load_state_dict(checkpoint['model'])
     else:
-        print(f"Error: No se encontro el modelo BTC en {model_file}")
+        print(f"Error: BTC model not found at {model_file}")
         sys.exit(1)
 
     # --- Features ---

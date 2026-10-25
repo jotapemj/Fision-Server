@@ -112,7 +112,7 @@ def _forget_size(path):
 def page():
     f = _PAGE_DIR / "index.html"
     if not f.exists():
-        raise HTTPException(status_code=404, detail="Panel no instalado")
+        raise HTTPException(status_code=404, detail="Admin panel not installed")
     return FileResponse(f, media_type="text/html",
                         headers={"Cache-Control": "no-cache"})
 
@@ -155,9 +155,9 @@ def overview(admin: str = Depends(admin_user)):
         "admins": len(users.admins()),
         "songs": songs,
         "jobs": {
-            "running": sum(j["estado"] == "running" for j in active),
-            "waiting_gpu": sum(j["estado"] == "waiting_gpu" for j in active),
-            "queued": sum(j["estado"] == "queued" for j in active),
+            "running": sum(j["state"] == "running" for j in active),
+            "waiting_gpu": sum(j["state"] == "waiting_gpu" for j in active),
+            "queued": sum(j["state"] == "queued" for j in active),
         },
     }
 
@@ -194,9 +194,9 @@ class NewUserIn(BaseModel):
 def create_user(body: NewUserIn, admin: str = Depends(admin_user)):
     name = (body.username or "").strip().lower()
     if not users.valid_username(name):
-        return _err("invalid_username", "Nombre de usuario no valido")
+        return _err("invalid_username", "Invalid username")
     if users.exists(name):
-        return _err("user_exists", "El usuario ya existe")
+        return _err("user_exists", "User already exists")
     pw = secrets.token_urlsafe(12)
     users.create(name, pw, admin=body.admin)
     log.event("user.create", user=name, role="admin" if body.admin else None, by=admin)
@@ -211,13 +211,13 @@ def _target(name):
 @router.delete("/api/users/{name}")
 def delete_user(name: str, purge: bool = False, admin: str = Depends(admin_user)):
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     if name == admin:
-        return _err("self_delete", "No se puede borrar la propia cuenta")
+        return _err("self_delete", "Cannot delete your own account")
     try:
         users.delete(name)
     except ValueError:
-        return _err("last_admin", "No se puede borrar el ultimo administrador")
+        return _err("last_admin", "Cannot delete the last administrator")
     # sus trabajos vivos no deben seguir escribiendo en una cuenta que ya no
     # existe; se espera al que corre para no recrear carpetas tras el borrado
     jobs.cancel_matching(name)
@@ -232,7 +232,7 @@ def delete_user(name: str, purge: bool = False, admin: str = Depends(admin_user)
 @router.post("/api/users/{name}/password")
 def reset_password(name: str, admin: str = Depends(admin_user)):
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     pw = secrets.token_urlsafe(12)
     users.set_password(name, pw)                  # sube el epoch: cierra sesiones
     log.event("password_change.success", user=name, by=admin)
@@ -242,7 +242,7 @@ def reset_password(name: str, admin: str = Depends(admin_user)):
 @router.post("/api/users/{name}/revoke")
 def revoke(name: str, admin: str = Depends(admin_user)):
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     users.revoke_sessions(name)
     log.event("sessions.revoke", user=name, by=admin)
     return {"ok": True}
@@ -255,13 +255,13 @@ class RoleIn(BaseModel):
 @router.put("/api/users/{name}/role")
 def set_role(name: str, body: RoleIn, admin: str = Depends(admin_user)):
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     if name == admin and not body.admin:
-        return _err("self_demote", "No se puede quitar el rol a la propia cuenta")
+        return _err("self_demote", "Cannot remove the role from your own account")
     try:
         users.set_admin(name, body.admin)
     except ValueError:
-        return _err("last_admin", "No se puede quitar el ultimo administrador")
+        return _err("last_admin", "Cannot remove the last administrator")
     log.event("user.role", user=name, role="admin" if body.admin else "user", by=admin)
     return {"username": name, "role": "admin" if body.admin else "user"}
 
@@ -270,7 +270,7 @@ def set_role(name: str, body: RoleIn, admin: str = Depends(admin_user)):
 def user_library(name: str, admin: str = Depends(admin_user)):
     """Solo metadatos. Ni audio, ni portadas, ni letras."""
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     lib = library.for_user(name)
     out = []
     for m in lib.list_entries():
@@ -281,8 +281,8 @@ def user_library(name: str, admin: str = Depends(admin_user)):
         except ValueError:
             size, has_lyrics = 0, False
         out.append({
-            "hash": h, "title": m.get("title") or m.get("nombre", ""),
-            "artist": m.get("artist", ""), "estado": m.get("estado", ""),
+            "hash": h, "title": m.get("title") or m.get("filename", ""),
+            "artist": m.get("artist", ""), "state": m.get("state", ""),
             "created_at": m.get("created_at", ""), "updated_at": m.get("updated_at", ""),
             "bytes": size, "lyrics": has_lyrics,
         })
@@ -313,11 +313,11 @@ def _duration(lib, h):
 def song_detail(name: str, h: str, admin: str = Depends(admin_user)):
     """Ficha tecnica de una cancion: que se genero, no el contenido."""
     if not _target(name):
-        return _err("user_not_found", "El usuario no existe", 404)
+        return _err("user_not_found", "User not found", 404)
     lib = library.for_user(name)
     m = lib.read_meta(h)
     if not m:
-        return _err("song_not_found", "La cancion no existe", 404)
+        return _err("song_not_found", "Song not found", 404)
     sd = lib.stems_dir(h)
     names = {p.stem for p in sd.glob("*.flac")} if sd.exists() else set()
     stems = sorted((n for n in names if not n.startswith("metronome")),
@@ -338,8 +338,8 @@ def song_detail(name: str, h: str, admin: str = Depends(admin_user)):
     src = lib.input_path(h)
     cfg = m.get("config") or {}
     return {
-        "hash": h, "title": m.get("title") or m.get("nombre", ""),
-        "artist": m.get("artist", ""), "estado": m.get("estado", ""),
+        "hash": h, "title": m.get("title") or m.get("filename", ""),
+        "artist": m.get("artist", ""), "state": m.get("state", ""),
         "created_at": m.get("created_at", ""), "updated_at": m.get("updated_at", ""),
         "bytes": _cached_size(lib.entry_dir(h), ttl=300),
         "format": src.suffix.lstrip(".").upper() if src else "",
@@ -360,7 +360,7 @@ def list_jobs(admin: str = Depends(admin_user)):
     out = []
     for j in jobs.list_all_active():
         meta = library.for_user(j["user"]).read_meta(j["hash"]) or {}
-        out.append({**j, "title": meta.get("title") or j["nombre"],
+        out.append({**j, "title": meta.get("title") or j["filename"],
                     "artist": meta.get("artist", "")})
     return {"jobs": out}
 
@@ -369,7 +369,7 @@ def list_jobs(admin: str = Depends(admin_user)):
 def cancel(jid: str, admin: str = Depends(admin_user)):
     job = jobs.get_job(jid)
     if not job or not jobs.cancel_job(jid):
-        return _err("job_not_found", "El trabajo no existe o ya termino", 404)
+        return _err("job_not_found", "Job not found or already finished", 404)
     log.event("job.cancel", user=job["user"], job_id=jid, by=admin)
     return {"ok": True}
 

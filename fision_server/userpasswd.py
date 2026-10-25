@@ -15,15 +15,15 @@ from . import users, log
 
 def main():
     if len(sys.argv) != 2:
-        print("uso: python -m fision_server.userpasswd <username>")
+        print("usage: python -m fision_server.userpasswd <username>")
         sys.exit(1)
     name = sys.argv[1]
 
     if not users.exists(name):
-        print(f"error: el usuario '{name}' no existe")
+        print(f"error: user '{name}' does not exist")
         sys.exit(1)
 
-    pw = getpass.getpass("Nueva password (Enter para generar): ").strip()
+    pw = getpass.getpass("New password (Enter to generate one): ").strip()
     generated = False
     if not pw:
         pw = secrets.token_urlsafe(12)
@@ -36,9 +36,9 @@ def main():
         sys.exit(1)
 
     log.event("password_change.success", user=name, by="admin_cli")
-    print(f"OK: password de '{name}' cambiada. Sus sesiones viejas caducan.")
+    print(f"OK: password of '{name}' changed. Its open sessions are closed.")
     if generated:
-        print(f"Password generada: {pw}")
+        print(f"Generated password: {pw}")
 
 
 if __name__ == "__main__":

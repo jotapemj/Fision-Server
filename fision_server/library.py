@@ -3,7 +3,7 @@ Biblioteca en disco, AISLADA POR USUARIO:
 
     library/<user>/<hash>/
         input.<ext>   audio original (semilla para reprocesar)
-        meta.json     nombre real, config vigente, estado, fecha
+        meta.json     filename, config vigente, state, fechas
         stems/        separacion vigente
         result.zip    zip de la separacion vigente
 
@@ -99,7 +99,7 @@ class UserLibrary:
 
     def __init__(self, user):
         if not valid_username(user):
-            raise ValueError(f"usuario invalido: {user!r}")
+            raise ValueError(f"invalid user: {user!r}")
         self.user = user
 
     @property
@@ -109,7 +109,7 @@ class UserLibrary:
     # ---- rutas (validan el hash) ----
     def entry_dir(self, h):
         if not valid_hash(h):
-            raise ValueError(f"hash invalido: {h!r}")
+            raise ValueError(f"invalid hash: {h!r}")
         return self.root / h
 
     def meta_path(self, h):  return self.entry_dir(h) / "meta.json"
@@ -195,7 +195,7 @@ class UserLibrary:
         if d.exists():
             shutil.rmtree(d)
 
-    # ---- guardar como el server (GUI/CLI) ----
+    # ---- guardar como el server (CLI) ----
     def prepare_entry(self, input_file):
         h = hash_file(input_file)
         d = self.entry_dir(h)
@@ -209,15 +209,15 @@ class UserLibrary:
             shutil.rmtree(tmp, ignore_errors=True)
         return h, tmp
 
-    def finalize_entry(self, h, tmp_stems, cfg, nombre):
+    def finalize_entry(self, h, tmp_stems, cfg, filename):
         self.commit_result(h, Path(tmp_stems))
         now = _now()
         title, artist = read_tags(self.input_path(h))
         meta = self.read_meta(h) or {"hash": h}
         meta.setdefault("created_at", now)
         meta.update({
-            "hash": h, "nombre": nombre, "config": cfg, "estado": "listo",
-            "updated_at": now, "title": title or Path(nombre).stem,
+            "hash": h, "filename": filename, "config": cfg, "state": "ready",
+            "updated_at": now, "title": title or Path(filename).stem,
             "artist": artist or "", "cover_url": cover_url(h),
         })
         self.write_meta(h, meta)
@@ -241,15 +241,15 @@ def list_user_dirs():
             if d.is_dir() and valid_username(d.name)]
 
 
-# ----------------------------------- back-compat GUI/CLI (single-user) ----
-# El guardado LOCAL de la GUI/CLI (un solo dueño en tu maquina) usa config.LOCAL_USER.
+# --------------------------------------- back-compat CLI (single-user) ----
+# El guardado LOCAL del CLI (un solo dueño en tu maquina) usa config.LOCAL_USER.
 # El servidor NO usa estas: siempre for_user(user_del_token).
 def prepare_entry(input_file, user=None):
     return for_user(user or config.LOCAL_USER).prepare_entry(input_file)
 
 
-def finalize_entry(h, tmp_stems, cfg, nombre, user=None):
-    return for_user(user or config.LOCAL_USER).finalize_entry(h, tmp_stems, cfg, nombre)
+def finalize_entry(h, tmp_stems, cfg, filename, user=None):
+    return for_user(user or config.LOCAL_USER).finalize_entry(h, tmp_stems, cfg, filename)
 
 
 def discard_tmp(h, user=None):

@@ -65,7 +65,7 @@ stays on the machine that runs the server.
 ```
 library/<user>/<hash>/
     input.<ext>     original audio (seed for reprocessing without re-uploading)
-    meta.json       display name, current config, state, timestamps
+    meta.json       file name, current config, state, timestamps
     stems/          current separation
     result.zip      zip of the current separation
 
@@ -113,7 +113,7 @@ All configuration is read from environment variables.
 |--------------------------|--------------------------|----------------------------------------------------|
 | `FISION_LIBRARY`         | `./library`              | Result storage root.                               |
 | `FISION_DATA`            | `./data`                 | Accounts, signing key and persisted queue.         |
-| `FISION_LOCAL_USER`      | `local`                  | Default owner for local GUI/CLI saves.             |
+| `FISION_LOCAL_USER`      | `local`                  | Default owner for local CLI saves.                 |
 | `FISION_SECRET`          | *(auto-generated)*       | Token-signing key. Persisted to `data/secret.key`. |
 | `FISION_TOKEN_TTL_HOURS` | `720`                    | Session lifetime (default 30 days).                |
 | `FISION_LOGIN_MAX_FAILS` | `5`                      | Failed logins per IP and username before `429`. `0` disables the limit. |
@@ -381,6 +381,65 @@ Request validation on `POST /jobs` and `POST /library/{hash}/reprocess`:
   included.
 - Files above `FISION_MAX_UPLOAD_MB` return `413`.
 
+### Jobs and library entries
+
+`POST /jobs` returns `{"hash", "job_id", "state", "cached"}`; on a cache hit
+there is no `job_id` and `state` is `ready`. `POST /library/{hash}/reprocess`
+and `POST /library/{hash}/lyrics` return `{"hash", "job_id", "state"}`.
+
+```json
+GET /jobs/{job_id}
+{
+  "job_id": "3f9c2a7d1b0e",
+  "hash": "<sha256>",
+  "state": "error",
+  "position": null,
+  "error": "GPU busy: not enough free VRAM after 600 s",
+  "error_code": "gpu_busy"
+}
+```
+
+`state` is one of `queued`, `running`, `waiting_gpu`, `done`, `error` or
+`cancelled`. `position` is the global queue position (1-based) of a queued
+job, `0` while it runs or waits for the GPU, and `null` once it has finished.
+`GET /jobs` lists the caller's live jobs as
+`{"job_id", "hash", "filename", "state", "position"}`.
+
+`error` is a human-readable English message and may change between releases;
+clients should branch on `error_code`, which is stable. Both are empty unless
+the job failed or was cancelled.
+
+| `error_code`      | Cause                                                        |
+|-------------------|--------------------------------------------------------------|
+| `cancelled`       | The job was cancelled.                                       |
+| `gpu_busy`        | Not enough free VRAM within `FISION_GPU_WAIT_TIMEOUT_SEC`.   |
+| `timeout`         | `FISION_JOB_TIMEOUT_SEC` or `FISION_LYRICS_TIMEOUT_SEC` elapsed. |
+| `pipeline_failed` | The separation pipeline exited with an error.               |
+| `lyrics_failed`   | The lyrics transcription exited with an error.              |
+| `input_missing`   | The stored input audio of the song is gone.                  |
+| `vocals_missing`  | `vocals.flac` is gone; the song must be processed first.     |
+| `internal`        | Any other server error.                                      |
+
+A library entry (`GET /library`, `GET /library/{hash}`):
+
+```json
+{
+  "hash": "<sha256>",
+  "filename": "song.mp3",
+  "title": "Song",
+  "artist": "Artist",
+  "cover_url": "/library/<sha256>/stems/artcover.png",
+  "state": "ready",
+  "config": {"sep": {"mode": "classic"}, "device": "cuda"},
+  "created_at": "2026-10-25T10:00:00+00:00",
+  "updated_at": "2026-10-25T10:04:12+00:00"
+}
+```
+
+`state` is `ready`, `processing`, `error` or `cancelled`. A failed or
+cancelled reprocess keeps the previous result, so the entry returns to `ready`
+when one exists. `DELETE /library/{hash}` returns `{"hash", "deleted": true}`.
+
 ### Pipeline contract
 
 The server invokes the pipeline as a subprocess:
@@ -444,7 +503,7 @@ GET /server/info
   "gpu_problem": "",
   "vram_free_mb": 10840,
   "vram_min_mb": 4096,
-  "version": "1.13.0"
+  "version": "2.0.0"
 }
 ```
 
@@ -488,7 +547,7 @@ the worker checks live free VRAM against `FISION_GPU_MIN_VRAM_MB` (default
 4096 MB). If not enough is free, the job moves to the `waiting_gpu` state,
 free VRAM is polled every `FISION_GPU_POLL_SEC` seconds (default 30), and the
 job resumes as soon as the threshold is met. If `FISION_GPU_WAIT_TIMEOUT_SEC`
-elapses (default 600), the job is aborted with `GPU ocupada`. If the host has
+elapses (default 600), the job fails with `error_code: "gpu_busy"`. If the host has
 no usable GPU, a job that requested `cuda` is downgraded to `cpu` so
 processing still completes; the `job.gpu_fallback` event records the reason
 (`no_gpu` or the `gpu_problem` code).
@@ -546,7 +605,7 @@ Rules (violations return `400` with a stable `code` next to `detail`):
 | `playlist_limit` | The account already has 200 playlists.                  |
 
 ```json
-{"detail": "Cancion repetida en la playlist", "code": "song_duplicate"}
+{"detail": "Song repeated in the playlist", "code": "song_duplicate"}
 ```
 
 `detail` is a human-readable message in Spanish and may change; clients should
@@ -574,7 +633,7 @@ the client must retry once the song is ready.
 ```
 POST /library/{hash}/lyrics
 Body: {"language": "en"}   -> ISO code, or null for auto-detect
-Return: {"job_id": "...", "hash": "...", "estado": "queued"}
+Return: {"job_id": "...", "hash": "...", "state": "queued"}
 ```
 
 Whisper supports 99 languages; some common ISO codes: `en`, `es`, `fr`, `de`,

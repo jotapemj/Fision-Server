@@ -133,9 +133,9 @@ def set_admin(name, flag):
     data = _load()
     u = data.get(name)
     if not u:
-        raise ValueError(f"el usuario '{name}' no existe")
+        raise ValueError(f"user '{name}' does not exist")
     if not flag and u.get("role") == "admin" and len(admins()) <= 1:
-        raise ValueError("no se puede quitar el ultimo administrador")
+        raise ValueError("cannot remove the last administrator")
     if flag:
         u["role"] = "admin"
     else:
@@ -150,7 +150,7 @@ def revoke_sessions(name):
     data = _load()
     u = data.get(name)
     if not u:
-        raise ValueError(f"el usuario '{name}' no existe")
+        raise ValueError(f"user '{name}' does not exist")
     u["token_epoch"] = u.get("token_epoch", 1) + 1
     u["updated_at"] = _now()
     _save(data)
@@ -161,12 +161,12 @@ def revoke_sessions(name):
 def create(name, password, admin=False):
     """Alta de usuario. Falla si el nombre no es valido o ya existe."""
     if not valid_username(name):
-        raise ValueError("username invalido (usa [a-z0-9_], 2-32 chars)")
+        raise ValueError("invalid username (use [a-z0-9_], 2-32 characters)")
     if not password or len(password) < 8:
-        raise ValueError("password muy corta (min 8)")
+        raise ValueError("password too short (minimum 8 characters)")
     data = _load()
     if name in data:
-        raise ValueError(f"el usuario '{name}' ya existe")
+        raise ValueError(f"user '{name}' already exists")
     now = _now()
     data[name] = {
         "username": name,
@@ -184,9 +184,9 @@ def create(name, password, admin=False):
 def delete(name):
     data = _load()
     if name not in data:
-        raise ValueError(f"el usuario '{name}' no existe")
+        raise ValueError(f"user '{name}' does not exist")
     if data[name].get("role") == "admin" and len(admins()) <= 1:
-        raise ValueError("no se puede borrar el ultimo administrador")
+        raise ValueError("cannot delete the last administrator")
     del data[name]
     _save(data)
 
@@ -237,11 +237,11 @@ def _verify(name, password):
 def set_password(name, new_password):
     """Cambia la password y SUBE token_epoch -> invalida todos los tokens viejos."""
     if not new_password or len(new_password) < 8:
-        raise ValueError("password muy corta (min 8)")
+        raise ValueError("password too short (minimum 8 characters)")
     data = _load()
     u = data.get(name)
     if not u:
-        raise ValueError(f"el usuario '{name}' no existe")
+        raise ValueError(f"user '{name}' does not exist")
     u["pwd_hash"] = _ph.hash(new_password)
     u["token_epoch"] = u.get("token_epoch", 1) + 1
     u["updated_at"] = _now()

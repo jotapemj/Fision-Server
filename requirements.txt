@@ -15,8 +15,8 @@
 # 2. THEN:  pip install -r requirements.txt -c constraints.txt
 #
 # System dependencies (not pip):
-#   sudo apt install ffmpeg python3-tk build-essential python3.12-dev
-#   (ffmpeg -> audio-separator and pydub ; python3-tk -> the desktop GUI ;
+#   sudo apt install ffmpeg build-essential python3.12-dev
+#   (ffmpeg -> audio-separator and pydub ;
 #    build-essential and python3.12-dev -> madmom is compiled on install)
 # ==========================================================================
 

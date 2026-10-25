@@ -20,34 +20,34 @@ def main():
     args = [a for a in sys.argv[1:] if a != "--admin"]
     want_admin = "--admin" in sys.argv[1:]
     if len(args) != 1:
-        print("uso: python -m fision_server.useradd <username> [--admin]")
+        print("usage: python -m fision_server.useradd <username> [--admin]")
         sys.exit(1)
     name = args[0]
 
     if not users.valid_username(name):
-        print(f"error: username invalido '{name}' (usa [a-z0-9_], 2-32 chars)")
+        print(f"error: invalid username '{name}' (use [a-z0-9_], 2-32 characters)")
         sys.exit(1)
     if users.exists(name):
-        print(f"error: el usuario '{name}' ya existe")
+        print(f"error: user '{name}' already exists")
         sys.exit(1)
 
-    print(f"biblioteca: {accounts.config.shown_path(accounts.config.LIBRARY_DIR)}   "
-          f"datos: {accounts.config.shown_path(accounts.config.DATA_DIR)}")
+    print(f"library: {accounts.config.shown_path(accounts.config.LIBRARY_DIR)}   "
+          f"data: {accounts.config.shown_path(accounts.config.DATA_DIR)}")
     left = accounts.leftovers(name)
     if left:
         # Restos de una cuenta borrada sin purgar: la nueva los heredaria
-        print(f"aviso: hay datos de una cuenta '{name}' anterior:")
+        print(f"warning: data from a previous account '{name}' is still on disk:")
         for p in left:
             print(f"    {p}")
-        ans = input("La cuenta nueva los vera como suyos. Continuar? [s/N]: ")
-        if ans.strip().lower() not in ("s", "si", "y", "yes"):
-            print("cancelado. Si sobran, borra a mano las rutas de arriba.")
+        ans = input("The new account will own it. Continue? [y/N]: ")
+        if ans.strip().lower() not in ("y", "yes"):
+            print("cancelled. If that data is not needed, delete the paths above.")
             sys.exit(1)
 
     first = not users.list_users()
     admin = want_admin or first
 
-    pw = getpass.getpass("Password (Enter para generar una): ").strip()
+    pw = getpass.getpass("Password (Enter to generate one): ").strip()
     generated = False
     if not pw:
         pw = secrets.token_urlsafe(12)
@@ -60,11 +60,11 @@ def main():
         sys.exit(1)
 
     log.event("user.create", user=name, role="admin" if admin else None, by="cli")
-    print(f"OK: usuario '{name}' creado{' como administrador' if admin else ''}.")
+    print(f"OK: user '{name}' created{' as administrator' if admin else ''}.")
     if first and not want_admin:
-        print("    (primer usuario de la instalacion: se le da el rol admin)")
+        print("    (first user of this installation: given the admin role)")
     if generated:
-        print(f"Password generada (guardala, no se vuelve a mostrar): {pw}")
+        print(f"Generated password (save it, it is not shown again): {pw}")
 
 
 if __name__ == "__main__":

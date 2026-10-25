@@ -24,7 +24,7 @@ servidor hace su commit a la biblioteca):
     python headless_fision_CLI.py <input> <output_dir> <config.json>
 
 El config.json puede ser:
-  - el dict de la GUI (sep_config) tal cual:
+  - el sep_config tal cual:
         {"mode":"personalized","vocals":"single","stems":{...}}
   - o el formato "rico", que lleva tambien device:
         {"sep": {...sep_config...}, "device":"cuda"}
@@ -65,21 +65,21 @@ def _load_config(arg):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Fision AI - pipeline completo por linea de comandos")
-    p.add_argument("input_file", help="Audio de entrada (mp3/wav)")
+        description="Fision AI - full pipeline from the command line")
+    p.add_argument("input_file", help="Input audio (mp3/wav/flac...)")
     p.add_argument("output_dir", nargs="?", default=None,
-                   help="Carpeta de salida (los stems van aqui). "
-                        "Se ignora con --save-server.")
+                   help="Output folder (the stems go here). "
+                        "Ignored with --save-server.")
     p.add_argument("config", nargs="?", default=None,
-                   help="config.json (sep_config de la GUI) o JSON en linea. "
-                        "Si se omite -> clasico 2 stems.")
+                   help="config.json (a sep_config) or inline JSON. "
+                        "If omitted -> classic 2 stems.")
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
-                   help="Procesador (cpu o cuda). Lo del config manda si lo trae.")
+                   help="Device (cpu or cuda). The config wins if it sets one.")
     p.add_argument("--btc", default="btc_extractor.py",
-                   help="Ruta al script btc_extractor.py")
+                   help="Path to the btc_extractor.py script")
     p.add_argument("--save-server", action="store_true", dest="save_server",
-                   help="Guarda en la biblioteca por hash, igual que el servidor "
-                        "(usa FISION_LIBRARY). Ignora output_dir.")
+                   help="Save to the library by hash, like the server "
+                        "(uses FISION_LIBRARY). Ignores output_dir.")
     args = p.parse_args()
 
     # -------------------- modo biblioteca (como el servidor) -----------------
@@ -89,8 +89,8 @@ def main():
         device = dev_cfg or args.device
         from fision_server import library     # fuente unica del guardado por hash
 
-        print(f"=== Fision CLI [biblioteca] === device={device} chords=BTC "
-              f"sep={'(por defecto 2 stems)' if sep_config is None else sep_config.get('mode')}")
+        print(f"=== Fision CLI [library] === device={device} chords=BTC "
+              f"sep={'(default 2 stems)' if sep_config is None else sep_config.get('mode')}")
 
         h = None
         try:
@@ -99,7 +99,7 @@ def main():
                          device=device, btc_script=args.btc, sep_config=sep_config)
             library.finalize_entry(h, tmp, sep_config,
                                    os.path.basename(args.input_file))
-            print(f"\n[biblioteca] guardado como {h}")
+            print(f"\n[library] saved as {h}")
         except Exception as e:
             if h:
                 try:
@@ -109,12 +109,12 @@ def main():
             print(f"\n[CLI] ERROR: {e}", file=sys.stderr)
             sys.exit(1)
 
-        print("\nProceso completo terminado \u2714")
+        print("\nFull process finished \u2714")
         sys.exit(0)
 
     # -------------------- modo carpeta (contrato del servidor) ---------------
     if not args.output_dir:
-        p.error("output_dir es obligatorio (o usa --save-server)")
+        p.error("output_dir is required (or use --save-server)")
 
     sep_config, dev_cfg = _load_config(args.config)
     device = dev_cfg or args.device          # el config tiene prioridad
@@ -122,7 +122,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"=== Fision CLI === device={device} chords=BTC "
-          f"sep={'(por defecto 2 stems)' if sep_config is None else sep_config.get('mode')}")
+          f"sep={'(default 2 stems)' if sep_config is None else sep_config.get('mode')}")
 
     try:
         run_pipeline(args.input_file, args.output_dir,
@@ -133,7 +133,7 @@ def main():
         print(f"\n[CLI] ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("\nProceso completo terminado \u2714")
+    print("\nFull process finished \u2714")
     sys.exit(0)
 
 

@@ -7,7 +7,7 @@ subproceso aislado (evita choques de versiones torch/madmom).
 Uso:
     python audio_separator_script.py <input_file> <output_dir> <config.json>
 
-Contrato del config (lo genera la GUI / orquestador):
+Contrato del config (lo genera el orquestador):
 
   Classic:
     {"mode":"classic","preset":"4stem"|"2stem","sep_mode":4|2,"vocals":"single"}
@@ -163,7 +163,7 @@ def drop_if_silent(path):
     try:
         data, _ = _read(path)
         if float(np.max(np.abs(data))) < SILENCE_THRESHOLD:
-            print(f"  - {os.path.basename(path)}: silencio, descartado")
+            print(f"  - {os.path.basename(path)}: silent, dropped")
             os.remove(path)
     except Exception:
         pass
@@ -197,7 +197,7 @@ def build_separator(output_dir):
     """
     try:
         import torch
-        print(f"CUDA disponible: {torch.cuda.is_available()}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
     except Exception:
         pass
 
@@ -241,7 +241,7 @@ def run(input_file, output_dir, cfg):
     sep = build_separator(output_dir)
 
     # ---- 1) BASE: voces / instrumental --------------------------------------
-    print("\n[BASE] RoFormer: voces + instrumental")
+    print("\n[BASE] RoFormer: vocals + instrumental")
     sep.load_model(model_filename=ROFORMER_VOCALS)
     sep.separate(input_file)
 
@@ -249,11 +249,11 @@ def run(input_file, output_dir, cfg):
                     or rename_and_clean(output_dir, "(Other)", "instrumental.flac"))
     rename_and_clean(output_dir, "(Vocals)", "vocals.flac")
     if instrumental is None:
-        raise RuntimeError("La base no genero instrumental.")
+        raise RuntimeError("The base separation produced no instrumental.")
 
     # ---- 2) VOCES: variante -------------------------------------------------
     if cfg.get("vocals", "single") == "split":
-        print("[VOCES] Karaoke gabox: principal + coros")
+        print("[VOCALS] Karaoke gabox: lead + backing")
         sep.load_model(HTDEMUCS_FT) # Loading a different model (not mdxc) to free sep object (bug patch)
         time.sleep(2)
         sep.load_model(model_filename=KARAOKE)
@@ -267,9 +267,9 @@ def run(input_file, output_dir, cfg):
     # ========================== CLASSIC ======================================
     if mode == "classic":
         if cfg.get("preset") == "2stem":
-            print("[CLASSIC] 2 stems listo: vocals + instrumental")
+            print("[CLASSIC] 2 stems ready: vocals + instrumental")
             return
-        print("[CLASSIC] 4 stems: HTDemucs ft sobre instrumental")
+        print("[CLASSIC] 4 stems: HTDemucs ft on the instrumental")
         sep.load_model(model_filename=HTDEMUCS_FT)
         sep.separate(instrumental)
         rename_and_clean(output_dir, "(Bass)", "bass.flac")
@@ -293,7 +293,7 @@ def run(input_file, output_dir, cfg):
 
     # ---- ft: bass / drums ---------------------------------------------------
     if need_ft:
-        print("[ft] HTDemucs ft sobre instrumental (bass/drums)")
+        print("[ft] HTDemucs ft on the instrumental (bass/drums)")
         sep.load_model(model_filename=HTDEMUCS_FT)
         sep.separate(instrumental)
         if want("bass"):
@@ -309,7 +309,7 @@ def run(input_file, output_dir, cfg):
 
     # ---- 6s: guitar / piano -------------------------------------------------
     if need_6s:
-        print("[6s] HTDemucs 6s sobre instrumental (guitar/piano)")
+        print("[6s] HTDemucs 6s on the instrumental (guitar/piano)")
         sep.load_model(model_filename=HTDEMUCS_6S)
         sep.separate(instrumental)
         if want("guitar"):
@@ -328,13 +328,13 @@ def run(input_file, output_dir, cfg):
 
     # ---- caso solo voces: vocals + instrumental, sin other ------------------
     if not any_extra:
-        print("[SOLO VOCES] dejo vocals + instrumental")
+        print("[VOCALS ONLY] keeping vocals + instrumental")
         return
 
     # ---- bucket other (por RESTA) ------------------------------------------
     other_path = os.path.join(output_dir, "other.flac")
     if kept:
-        print("[other] instrumental - stems extraidos (resta)")
+        print("[other] instrumental - extracted stems (subtraction)")
         subtract_wavs(instrumental, kept, other_path)
         _safe_remove(instrumental)       # instrumental.flac es intermedio aqui
     else:
@@ -343,7 +343,7 @@ def run(input_file, output_dir, cfg):
 
     # ---- drums split (despues del other, usa drums.flac completo) ------------
     if want("drums") and drums_variant == "split":
-        print("[drums] MDX23C: kick/snare/toms/hh/ride/crash + perc(resta)")
+        print("[drums] MDX23C: kick/snare/toms/hh/ride/crash + perc (subtraction)")
         drums_path = os.path.join(output_dir, "drums.flac")
         sep.load_model(model_filename=DRUMSEP)
         sep.separate(drums_path)
@@ -358,7 +358,7 @@ def run(input_file, output_dir, cfg):
 
     # ---- vientos al FINAL: consume el other --------------------------------
     if want("brass"):
-        print("[brass] 17_HP-Wind sobre other.flac")
+        print("[brass] 17_HP-Wind on other.flac")
         sep.load_model(model_filename=WINDS)
         sep.separate(other_path)
         _safe_remove(other_path)         # el other viejo es la entrada, fuera
@@ -372,13 +372,13 @@ def run(input_file, output_dir, cfg):
                "kick.flac", "snare.flac", "toms.flac", "hh.flac", "ride.flac", "crash.flac"):
         drop_if_silent(os.path.join(output_dir, nm))
 
-    print("\n[OK] Separacion personalizada completada.")
+    print("\n[OK] Custom separation completed.")
 
 
 # ------------------------------------------------------------------ MAIN ------
 def main():
     if len(sys.argv) != 4:
-        print("Uso: python audio_separator_script.py <input_file> <output_dir> <config.json>")
+        print("Usage: python audio_separator_script.py <input_file> <output_dir> <config.json>")
         sys.exit(1)
 
     input_file = sys.argv[1]

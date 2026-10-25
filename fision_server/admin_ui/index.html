@@ -597,11 +597,11 @@ async function viewLibrary(name) {
       <div class="page-head"><div><h1>${esc(T.libraryOf(name))}</h1><div class="counter">${d.songs.length ? esc(T.songs(d.songs.length)) : ""}</div></div></div></div>
     <div class="banner" style="background:var(--surface-1);border-color:var(--border);color:var(--text-muted)">${ico("shield")}<div>${esc(T.metaOnly)}</div></div>
     ${d.songs.length ? `<div class="list">${d.songs.map(s => {
-      const st = T.st[s.estado] || s.estado;
-      const proc = s.estado === "procesando";
+      const st = T.st[s.state] || s.state;
+      const proc = s.state === "processing";
       return `<div class="row tap" data-h="${esc(s.hash)}" role="button" tabindex="0"><div class="cover">${ico("music")}${proc ? `<div class="veil"><div class="spin"></div></div>` : ""}</div>
         <div class="tx"><div class="t">${esc(s.title || s.hash.slice(0, 12))}${s.lyrics ? `<span class="tag muted">${esc(T.lyricsTag)}</span>` : ""}</div>
-        <div class="s ${s.estado === "error" ? "err" : ""}">${esc([s.artist, st, bytes(s.bytes), fmtDate(s.created_at)].filter(Boolean).join(" · "))}</div></div></div>`;
+        <div class="s ${s.state === "error" ? "err" : ""}">${esc([s.artist, st, bytes(s.bytes), fmtDate(s.created_at)].filter(Boolean).join(" · "))}</div></div></div>`;
     }).join("")}</div>` : `<div class="empty">${ico("music")}<div>${esc(T.emptyLib)}</div></div>`}
   </div>`);
   $("#bk").addEventListener("click", () => go("users"));
@@ -632,7 +632,7 @@ async function dlgSong(name, h) {
   dialog(`<div class="big">${ico("music")}</div>
     <h3>${esc(d.title || d.hash.slice(0, 12))}</h3>${d.artist ? `<p>${esc(d.artist)}</p>` : ""}
     <div class="kvs">
-      ${kv(D.state, T.st[d.estado] || d.estado)}
+      ${kv(D.state, T.st[d.state] || d.state)}
       ${kv(D.duration, fmtDur(d.duration))}
       ${kv(D.format, d.format)}
       ${kv(D.size, bytes(d.bytes))}
@@ -656,8 +656,8 @@ async function viewJobs(quiet) {
   setMain(`<div class="page">
     <div class="page-head"><div><h1>${esc(T.jobs)}</h1>${d.jobs.length ? `<div class="counter">${d.jobs.length}</div>` : ""}</div></div>
     ${d.jobs.length ? `<div class="list">${d.jobs.map(j => {
-      const status = j.estado === "running" ? T.jobRunning : j.estado === "waiting_gpu" ? T.jobWaiting : T.jobQueued(j.posicion);
-      return `<div class="row"><div class="cover">${ico("music")}<div class="veil"><div class="spin ${j.estado === "waiting_gpu" ? "wait" : ""}"></div></div></div>
+      const status = j.state === "running" ? T.jobRunning : j.state === "waiting_gpu" ? T.jobWaiting : T.jobQueued(j.position);
+      return `<div class="row"><div class="cover">${ico("music")}<div class="veil"><div class="spin ${j.state === "waiting_gpu" ? "wait" : ""}"></div></div></div>
         <div class="tx"><div class="t">${esc(j.title)}${j.kind === "lyrics" ? `<span class="tag muted">${esc(T.lyricsJob)}</span>` : ""}</div>
         <div class="s">${esc([j.user, j.artist, status].filter(Boolean).join(" · "))}</div></div>
         <button class="iconbtn tap" data-job="${esc(j.job_id)}" data-title="${esc(j.title)}" aria-label="${esc(T.cancelJob)}" title="${esc(T.cancelJob)}">${ico("close")}</button></div>`;

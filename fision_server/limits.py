@@ -73,17 +73,17 @@ class BodyLimit:
             user, reason = security.check(token) if token else (None, "missing")
             if reason:
                 log.event("upload.reject", reason=reason, path=path, user=user or "-")
-                return await _reply(send, 401, "No autenticado")
+                return await _reply(send, 401, "Not authenticated")
 
         cl = headers.get(b"content-length")
         if cl is not None:
             try:
                 declared = int(cl)
             except ValueError:
-                return await _reply(send, 400, "Content-Length invalido")
+                return await _reply(send, 400, "Invalid Content-Length")
             if declared > limit:
                 log.event("upload.too_large", path=path, bytes=declared, limit=limit)
-                return await _reply(send, 413, "Peticion demasiado grande")
+                return await _reply(send, 413, "Request too large")
 
         state = {"bytes": 0, "over": False, "sent": False}
 
@@ -101,7 +101,7 @@ class BodyLimit:
             if state["over"]:
                 if not state["sent"]:
                     state["sent"] = True
-                    await _reply(send, 413, "Peticion demasiado grande")
+                    await _reply(send, 413, "Request too large")
                 return
             if msg["type"] == "http.response.start":
                 state["sent"] = True
@@ -118,4 +118,4 @@ class BodyLimit:
             log.event("upload.too_large", path=path, bytes=state["bytes"], limit=limit)
             if not state["sent"]:
                 state["sent"] = True
-                await _reply(send, 413, "Peticion demasiado grande")
+                await _reply(send, 413, "Request too large")

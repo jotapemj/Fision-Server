@@ -1,6 +1,6 @@
 """
 Puente al orquestador. Lo llama como SUBPROCESO (aislado): si revienta, no se
-lleva por delante al servidor. Mismo patron que la GUI con el separador.
+lleva por delante al servidor.
 
 Cada job corre en su propio grupo de procesos: el orquestador lanza a su vez
 el separador como hijo, y cancelar/timeout tiene que matar a todos (si no, el
@@ -17,8 +17,19 @@ from . import config
 _POSIX = os.name == "posix"
 
 
-class JobTimeout(RuntimeError):
+class JobError(RuntimeError):
+    """Fallo de un job. `code` es estable (error_code en /jobs/{id}); el texto no."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+class JobTimeout(JobError):
     """El subproceso supero su tope de tiempo."""
+
+    def __init__(self, timeout):
+        super().__init__("timeout", f"timed out after {timeout} s")
 
 
 def _popen(cmd):
@@ -46,7 +57,7 @@ def stop(proc, grace=15):
         pass
 
 
-def _run(cmd, timeout, on_proc, what):
+def _run(cmd, timeout, on_proc, code, what):
     proc = _popen(cmd)
     if on_proc:
         on_proc(proc)                 # el worker lo guarda para poder cancelar
@@ -54,9 +65,9 @@ def _run(cmd, timeout, on_proc, what):
         ret = proc.wait(timeout=timeout if timeout > 0 else None)
     except subprocess.TimeoutExpired:
         stop(proc)
-        raise JobTimeout(f"timeout ({timeout} s)")
+        raise JobTimeout(timeout)
     if ret != 0:
-        raise RuntimeError(f"{what} fallo (codigo {ret})")
+        raise JobError(code, f"{what} failed (exit code {ret})")
 
 
 def process(input_path, out_stems_dir, cfg, on_proc=None):
@@ -69,7 +80,7 @@ def process(input_path, out_stems_dir, cfg, on_proc=None):
         json.dump(cfg, f, ensure_ascii=False)
 
     cmd = config.cli_command(input_path, out_stems_dir, cfg_file)
-    _run(cmd, config.JOB_TIMEOUT_SEC, on_proc, "orquestador")
+    _run(cmd, config.JOB_TIMEOUT_SEC, on_proc, "pipeline_failed", "pipeline")
 
 
 def process_lyrics(vocals_path, out_stems_dir, language=None, device=None,
@@ -84,4 +95,4 @@ def process_lyrics(vocals_path, out_stems_dir, language=None, device=None,
 
     cmd = config.lyrics_cli_command(vocals_path, out_stems_dir, language,
                                     device=device, compute=compute)
-    _run(cmd, config.LYRICS_TIMEOUT_SEC, on_proc, "lyrics CLI")
+    _run(cmd, config.LYRICS_TIMEOUT_SEC, on_proc, "lyrics_failed", "lyrics")

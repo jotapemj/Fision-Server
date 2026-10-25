@@ -21,10 +21,10 @@ def rechord(lib, h):
     meta = lib.read_meta(h)
     inp = lib.input_path(h)
     stems = lib.stems_dir(h)
-    if not meta or meta.get("estado") != "listo" or inp is None:
-        return "sin resultado listo"
+    if not meta or meta.get("state") != "ready" or inp is None:
+        return "no ready result"
     if not (stems / "beats.txt").exists():
-        return "sin beats.txt"
+        return "no beats.txt"
 
     run_btc(str(inp), str(stems))
     analyze_chords_file(str(stems))
@@ -38,7 +38,7 @@ def rechord(lib, h):
 
 def main():
     if len(sys.argv) < 3:
-        print("uso: python -m fision_server.rechords <user> --all | <hash> ...")
+        print("usage: python -m fision_server.rechords <user> --all | <hash> ...")
         sys.exit(1)
     user, targets = sys.argv[1], sys.argv[2:]
     try:
@@ -53,22 +53,22 @@ def main():
     ok = fail = 0
     for i, h in enumerate(targets, 1):
         if not library.valid_hash(h) or not lib.exists(h):
-            print(f"[{i}/{len(targets)}] {h[:12]}: no existe")
+            print(f"[{i}/{len(targets)}] {h[:12]}: not found")
             fail += 1
             continue
-        name = (lib.read_meta(h) or {}).get("nombre", h)
+        name = (lib.read_meta(h) or {}).get("filename", h)
         print(f"[{i}/{len(targets)}] {name}")
         try:
             err = rechord(lib, h)
         except Exception as e:                   # una cancion rota no para el resto
             err = str(e)
         if err:
-            print(f"    saltada: {err}")
+            print(f"    skipped: {err}")
             fail += 1
         else:
             ok += 1
     log.event("chords.regenerate", user=user, ok=ok, failed=fail)
-    print(f"OK: {ok} regeneradas, {fail} saltadas.")
+    print(f"OK: {ok} regenerated, {fail} skipped.")
 
 
 if __name__ == "__main__":
