@@ -608,7 +608,7 @@ Rules (violations return `400` with a stable `code` next to `detail`):
 {"detail": "Song repeated in the playlist", "code": "song_duplicate"}
 ```
 
-`detail` is a human-readable message in Spanish and may change; clients should
+`detail` is a human-readable message in English and may change; clients should
 localize from `code` and fall back to `detail` only for unknown codes. Local-only
 songs cannot be added.
 
