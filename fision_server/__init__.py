@@ -10,4 +10,4 @@ Se expone en GET /server/info["version"] para que el cliente pueda
 mostrarla y detectar incompatibilidades.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

@@ -45,14 +45,16 @@ it.
 
 1. Start the server with Docker on a Linux machine with an NVIDIA GPU (see
    [Install](#install)). It also runs on the CPU, much slower.
-2. Check the installation and download every model up front (several GB):
+2. Check the installation and download every model up front (several GB),
+   plus the demo song that new accounts receive:
 
    ```bash
    docker compose exec fision python -m fision_server.doctor
    docker compose exec fision python -m fision_server.prefetch
    ```
 
-3. Create the first account, which becomes the administrator:
+3. Create the first account, which becomes the administrator. Every new
+   account starts with the demo song in its library:
 
    ```bash
    docker compose exec fision python -m fision_server.useradd <name>
@@ -316,6 +318,13 @@ before redistributing.
   chords, through a compatibility fork. MIT.
 - [Whisper](https://github.com/openai/whisper), OpenAI, through
   [faster-whisper](https://github.com/SYSTRAN/faster-whisper): lyrics. MIT.
+
+**Demo song**
+
+- "Airplane Mode" by [Josh Woodward](https://www.joshwoodward.com/song/AirplaneMode),
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  Fision distributes it separated into stems, with its analysis files and
+  synchronized lyrics. Downloaded by `prefetch`; not part of the repository.
 
 **Server**
 

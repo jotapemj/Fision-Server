@@ -4,7 +4,8 @@ Descarga todos los pesos de una vez, antes del primer trabajo:
     python -m fision_server.prefetch
 
 Separacion (audio-separator), beat_this y el Whisper de FISION_WHISPER_MODEL,
-en las carpetas de FISION_MODELS_DIR (o las de cada libreria). Lo que ya esta
+en las carpetas de FISION_MODELS_DIR (o las de cada libreria). Ademas la
+cancion demo de las cuentas nuevas (library/.demo/), si no hay ninguna. Lo que ya esta
 no se vuelve a bajar: se puede repetir. Sin esto, el primer trabajo baja
 varios GB y falla si se corta la red.
 
@@ -57,6 +58,13 @@ def fetch_whisper():
     download_model(config.WHISPER_MODEL)
 
 
+def fetch_demo():
+    from . import demo
+    print(f"   {config.shown_path(demo.DEMO_DIR)}")
+    if not demo.fetch():
+        print("   already present")
+
+
 def main():
     from . import __version__
     print(f"Fision {__version__} - prefetch")
@@ -64,7 +72,8 @@ def main():
         print(f"   {label}: {config.shown_path(path)}")
     results = [_step("separation", fetch_separator),
                _step("beat_this", fetch_beat_this),
-               _step(f"Whisper {config.WHISPER_MODEL}", fetch_whisper)]
+               _step(f"Whisper {config.WHISPER_MODEL}", fetch_whisper),
+               _step("demo song", fetch_demo)]
     if all(results):
         print("\nEverything downloaded.")
         sys.exit(0)

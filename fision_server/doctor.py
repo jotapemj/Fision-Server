@@ -16,7 +16,7 @@ import shutil
 import importlib.metadata as md
 from pathlib import Path
 
-from . import config, users, gpu
+from . import config, users, gpu, demo
 from .gpu_probe import run as probe_gpu, assess
 
 _counts = {"OK": 0, "WARN": 0, "FAIL": 0}
@@ -206,6 +206,12 @@ def check_accounts():
                _cmd("python -m fision_server.usermod <name> --admin"))
     else:
         report("OK", f"{count}, admin: {', '.join(users.admins())}")
+    songs = demo.entries()
+    if songs:
+        report("OK", f"demo song for new accounts: {len(songs)}")
+    else:
+        report("OK", "no demo song for new accounts (optional)",
+               _cmd("python -m fision_server.prefetch"))
 
 
 def model_dirs():

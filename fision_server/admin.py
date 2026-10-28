@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import (config, users, library, jobs, playlists, avatars, gpu, log,
-               accounts, __version__)
+               accounts, demo, __version__)
 from .auth import current_user
 
 _STARTED = time.time()
@@ -200,6 +200,13 @@ def create_user(body: NewUserIn, admin: str = Depends(admin_user)):
     pw = secrets.token_urlsafe(12)
     users.create(name, pw, admin=body.admin)
     log.event("user.create", user=name, role="admin" if body.admin else None, by=admin)
+    try:
+        n = demo.give(name)
+        if n:
+            log.event("user.demo", user=name, songs=n, by=admin)
+    except Exception as e:
+        # la cuenta ya existe: sin demo no se deshace el alta
+        log.event("user.demo_failed", user=name, error=str(e), by=admin)
     # la password solo viaja en esta respuesta; no se guarda en claro
     return {"username": name, "password": pw, "role": "admin" if body.admin else "user"}
 

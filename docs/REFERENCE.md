@@ -69,6 +69,9 @@ library/<user>/<hash>/
     stems/          current separation
     result.zip      zip of the current separation
 
+library/.demo/<hash>/  demo song template, same layout as an entry plus
+                    NOTICE.txt; copied to every new account (see below)
+
 library/.incoming/  uploads in progress; same filesystem as the library so the
                     final move is an atomic rename. Emptied on startup.
 
@@ -199,7 +202,7 @@ There is **no public registration**. Accounts are created from the host shell,
 and credentials are distributed out of band.
 
 ```bash
-python -m fision_server.useradd    <username> [--admin]  # create account (prompts for a password)
+python -m fision_server.useradd    <username> [--admin] [--no-demo]  # create account (prompts for a password)
 python -m fision_server.usermod    <username> --admin|--no-admin  # grant or remove the admin role
 python -m fision_server.userpasswd <username>   # reset a password (invalidates old sessions)
 python -m fision_server.userdel    <username> [--purge]  # delete an account; --purge also removes its library, playlists and avatar
@@ -220,6 +223,22 @@ on disk, and a new account with the same name would inherit them; `useradd`
 lists such leftovers and asks before continuing. `userdel --purge` refuses to
 run while the account has live jobs, since a command-line tool cannot cancel
 them; cancel them from the admin panel first.
+
+### Demo song
+
+New accounts, created with `useradd` or from the admin panel, receive a copy
+of every entry in `library/.demo/` (the demo song). `useradd --no-demo` skips
+it; existing accounts are not changed. Without a template nothing is copied.
+
+`prefetch` downloads the official template ("Airplane Mode" by Josh Woodward,
+CC BY 4.0) from the GitHub release when `library/.demo/` is empty, and builds
+its `result.zip`. Any processed entry can serve as a template instead: copy
+its `<hash>/` folder into `library/.demo/`.
+
+Audio files and `result.zip` are hard-linked when the template is on the same
+filesystem as the library, so each copy is instant and takes no extra space;
+small files are copied. The copy's `created_at` and `updated_at` are the
+account's creation time. The user can delete it like any other song.
 
 ### Admin panel
 
@@ -478,12 +497,14 @@ or `FAIL` (will not work), with the fix below each problem, and exits with
 - The BTC weights (git submodule) and the metronome sample.
 - The separation, `beat_this` and Whisper weights that are not downloaded
   yet.
-- Accounts: at least one user and one administrator.
+- Accounts: at least one user and one administrator, and whether a demo song
+  is available for new accounts.
 
 `prefetch` downloads the separation models, the `beat_this` checkpoints and
 the Whisper model set in `FISION_WHISPER_MODEL` (several GB) into the model
-folders. Without it, the first job downloads them and fails if the network
-drops. Files already present are skipped, so it can be run again after an
+folders, and the [demo song](#demo-song) if `library/.demo/` is empty.
+Without it, the first job downloads them and fails if the network drops.
+Files already present are skipped, so it can be run again after an
 interrupted download or a model change.
 
 ## Hardware detection and GPU gating
@@ -734,6 +755,7 @@ prefixes are emitted:
 ... AUDIT  gpu.check usable=True torch=2.13.0+cu129 cuda=12.9 cudnn=92000 capability=8.6
 ... AUDIT  gpu.unusable problem=torch_no_cuda
 ... AUDIT  user.create user=alice
+... AUDIT  user.demo user=alice songs=1 by=cli
 ... AUDIT  login.success user=alice
 ... AUDIT  login.fail user=alice reason=bad_credentials
 ... AUDIT  login.blocked user=alice ip=100.64.0.7 scope=user
