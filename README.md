@@ -9,13 +9,13 @@
     <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI">
     <img src="https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
     <img src="https://img.shields.io/badge/CUDA-76B900?logo=nvidia&logoColor=white" alt="CUDA">
-    <a href="https://github.com/jotapemj/FisionApp-Android"><img src="https://img.shields.io/badge/App-Android-34A853?logo=android&logoColor=white" alt="App: Android"></a>
+    <a href="https://github.com/jotapemj/Fision-AppAndroid"><img src="https://img.shields.io/badge/App-Android-34A853?logo=android&logoColor=white" alt="App: Android"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-BD0000" alt="License: AGPL-3.0"></a>
   </p>
 </div>
 
 FisionServer is the self-hosted backend of Fision. A song sent from the
-[Fision app](https://github.com/jotapemj/FisionApp-Android) comes back as
+[Fision app](https://github.com/jotapemj/Fision-AppAndroid) comes back as
 separate stems with beats, chords, metronomes and lyrics, all processed on
 the server's own GPU. Accounts, library and models stay on the host that runs
 it.
@@ -60,7 +60,7 @@ it.
    docker compose exec fision python -m fision_server.useradd <name>
    ```
 
-4. Install the [Fision app](https://github.com/jotapemj/FisionApp-Android) and
+4. Install the [Fision app](https://github.com/jotapemj/Fision-AppAndroid) and
    sign in with the server address and the account.
 
 On a [native install](#native-install) the same commands run without the
