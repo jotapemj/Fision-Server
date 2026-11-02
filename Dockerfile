@@ -45,17 +45,18 @@ RUN apt-get update \
 
 COPY --from=build /opt/venv /opt/venv
 
-WORKDIR /app
-COPY . /app
-# Sin el submodulo no hay acordes: mejor fallar al construir que en el primer job
-RUN test -f BTC-ISMIR19/test/btc_model_large_voca.pt \
- || (echo "Missing BTC weights: clone with --recurse-submodules" >&2; exit 1)
-
 RUN groupadd -g ${FISION_GID} fision \
  && useradd -u ${FISION_UID} -g ${FISION_GID} -m -d /home/fision fision \
  && mkdir -p /data /library /models \
  && chown fision:fision /data /library /models \
  && chmod 1777 /home/fision
+
+# El codigo al final: cambia en cada version y no debe invalidar lo de arriba
+WORKDIR /app
+COPY . /app
+# Sin el submodulo no hay acordes: mejor fallar al construir que en el primer job
+RUN test -f BTC-ISMIR19/test/btc_model_large_voca.pt \
+ || (echo "Missing BTC weights: clone with --recurse-submodules" >&2; exit 1)
 
 # Rutas fijas dentro del contenedor; en el host son volumenes (compose.yaml).
 # nvidia-smi (utility) mide la VRAM: sin el, todo iria a CPU.

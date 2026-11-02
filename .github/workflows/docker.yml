@@ -57,3 +57,8 @@ jobs:
           build-args: TORCH_INDEX=${{ matrix.variant }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Cache en GHCR, una por variante: sin ella cada tag rehace el venv
+          # (varios GB) con otra huella y los usuarios lo bajan entero otra vez.
+          # mode=max guarda tambien la etapa build (donde vive el venv).
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/fision-server:buildcache-${{ matrix.variant }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/fision-server:buildcache-${{ matrix.variant }},mode=max
