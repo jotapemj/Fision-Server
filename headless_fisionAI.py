@@ -432,7 +432,7 @@ def _split_verses(sub, min_words=_LYRICS_SPLIT_MIN_WORDS):
     return out
 
 
-# Coletillas de subtitulos de YouTube que Whisper alucina en tramos sin voz.
+# Coletillas de subtitulos de video que Whisper alucina en tramos sin voz.
 # Patrones explicitos: nada de umbrales que puedan comerse letra real
 # ("te amara" es letra; "Amara.org" no).
 _LYRICS_BOILERPLATE = re.compile(
