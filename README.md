@@ -195,6 +195,9 @@ docker compose pull
 docker compose up -d
 ```
 
+Installations from before 2.1.0 have no demo song for new accounts until
+`docker compose exec fision python -m fision_server.prefetch` is run once.
+
 After editing `.env`, apply it with `docker compose up -d`. `docker compose
 restart` keeps the old values.
 
@@ -325,6 +328,11 @@ before redistributing.
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
   Fision distributes it separated into stems, with its analysis files and
   synchronized lyrics. Downloaded by `prefetch`; not part of the repository.
+
+**Sounds**
+
+- Metronome click: ["Metronome.wav"](https://freesound.org/people/Druminfected/sounds/250552/)
+  by Druminfected (Freesound). [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 **Server**
 
