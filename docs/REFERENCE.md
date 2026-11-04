@@ -268,7 +268,10 @@ Access needs both an administrator account and a client address inside
 Tailscale, so the panel is not reachable from the internet even if the API is.
 Behind a reverse proxy on the same host, either forward the client address
 (uvicorn trusts `X-Forwarded-For` from `127.0.0.1`) or block `/admin` at the
-proxy; otherwise every request appears to come from loopback.
+proxy; otherwise every request appears to come from loopback. With the Docker
+image, uvicorn does not trust that header from the container network: block
+`/admin` at the proxy. Login attempts are also limited per client address, so
+without the real address all clients share one limit.
 
 The panel is available in English, Spanish, Portuguese, Italian, French,
 German, Russian, Chinese, Catalan and Ukrainian. It follows the system language and
