@@ -25,7 +25,7 @@ fastapi==0.139.0
 uvicorn[standard]==0.51.0
 python-multipart==0.0.32
 argon2-cffi==25.1.0
-PyJWT==2.13.0
+PyJWT==2.15.1
 
 # ---- Audio metadata (tags/cover) ----
 mutagen==1.48.1

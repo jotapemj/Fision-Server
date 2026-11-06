@@ -91,11 +91,14 @@ def _load():
 def _save(data):
     p = Path(config.USERS_FILE)
     tmp = p.with_suffix(p.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
+    # tmp nuevo con 0600: los hashes nunca quedan legibles por otros
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, p)                 # escritura atomica
     try:
-        os.chmod(p, 0o600)             # hashes solo legibles por el dueño
+        os.chmod(p, 0o600)             # arregla users.json de versiones viejas
     except OSError:
         pass
 

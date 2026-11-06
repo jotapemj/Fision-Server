@@ -190,11 +190,10 @@ def _load_secret():
     if SECRET_FILE.exists():
         return SECRET_FILE.read_text(encoding="utf-8").strip()
     s = secrets.token_urlsafe(48)
-    SECRET_FILE.write_text(s, encoding="utf-8")
-    try:
-        os.chmod(SECRET_FILE, 0o600)     # solo el dueño puede leerla
-    except OSError:
-        pass
+    # 0600 desde que nace: sin ventana legible por otros
+    fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(s)
     return s
 
 

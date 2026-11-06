@@ -44,9 +44,10 @@ def check(token):
             data = jwt.decode(token, config.SECRET, algorithms=["HS256"],
                               options={"verify_exp": False})
             return data.get("sub"), "expired"
-        except jwt.PyJWTError:
+        except (jwt.PyJWTError, RecursionError):
             return None, "bad_token"
-    except jwt.PyJWTError:
+    except (jwt.PyJWTError, RecursionError):
+        # RecursionError: JSON muy anidado (PyJWT viejo no lo envuelve)
         return None, "bad_token"
     name = data.get("sub")
     if not name or not users.exists(name):
