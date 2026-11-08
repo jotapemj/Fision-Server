@@ -57,6 +57,8 @@ COPY . /app
 # Sin el submodulo no hay acordes: mejor fallar al construir que en el primer job
 RUN test -f BTC-ISMIR19/test/btc_model_large_voca.pt \
  || (echo "Missing BTC weights: clone with --recurse-submodules" >&2; exit 1)
+# Cliente web fijado por esta version (sha256 en fision_server/web.py)
+RUN /opt/venv/bin/python -m fision_server.web
 
 # Rutas fijas dentro del contenedor; en el host son volumenes (compose.yaml).
 # nvidia-smi (utility) mide la VRAM: sin el, todo iria a CPU.

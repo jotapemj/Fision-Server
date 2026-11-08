@@ -5,7 +5,8 @@ Descarga todos los pesos de una vez, antes del primer trabajo:
 
 Separacion (audio-separator), beat_this y el Whisper de FISION_WHISPER_MODEL,
 en las carpetas de FISION_MODELS_DIR (o las de cada libreria). Ademas la
-cancion demo de las cuentas nuevas (library/.demo/), si no hay ninguna. Lo que ya esta
+cancion demo de las cuentas nuevas (library/.demo/), si no hay ninguna, y
+el cliente web fijado por esta version (webapp/). Lo que ya esta
 no se vuelve a bajar: se puede repetir. Sin esto, el primer trabajo baja
 varios GB y falla si se corta la red.
 
@@ -65,6 +66,13 @@ def fetch_demo():
         print("   already present")
 
 
+def fetch_web():
+    from . import web
+    print(f"   {web.WEB_VERSION} -> {config.shown_path(web.WEB_DIR)}")
+    if not web.fetch():
+        print("   already present")
+
+
 def main():
     from . import __version__
     print(f"Fision {__version__} - prefetch")
@@ -73,7 +81,8 @@ def main():
     results = [_step("separation", fetch_separator),
                _step("beat_this", fetch_beat_this),
                _step(f"Whisper {config.WHISPER_MODEL}", fetch_whisper),
-               _step("demo song", fetch_demo)]
+               _step("demo song", fetch_demo),
+               _step("web app", fetch_web)]
     if all(results):
         print("\nEverything downloaded.")
         sys.exit(0)

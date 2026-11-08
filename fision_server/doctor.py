@@ -3,8 +3,8 @@ Diagnostico de la instalacion. Lo primero ante un problema:
 
     python -m fision_server.doctor
 
-Revisa Python, ffmpeg, carpetas, GPU (nvidia-smi, torch, Whisper), pesos y
-cuentas. Una linea por punto: OK, WARN (funciona, pero conviene mirarlo) o
+Revisa Python, ffmpeg, carpetas, GPU (nvidia-smi, torch, Whisper), pesos,
+cuentas y la web. Una linea por punto: OK, WARN (funciona, pero conviene mirarlo) o
 FAIL (algo no va a funcionar). Sale con 1 si hay algun FAIL.
 
 Ejecutalo con las mismas envs que el servicio: sin ellas mira ./data,
@@ -16,7 +16,7 @@ import shutil
 import importlib.metadata as md
 from pathlib import Path
 
-from . import config, users, gpu, demo
+from . import config, users, gpu, demo, web
 from .gpu_probe import run as probe_gpu, assess
 
 _counts = {"OK": 0, "WARN": 0, "FAIL": 0}
@@ -214,6 +214,19 @@ def check_accounts():
                _cmd("python -m fision_server.prefetch"))
 
 
+def check_web():
+    print("\nWeb app")
+    got = web.installed()
+    if web.is_current():
+        report("OK", f"web app {got['version']} at /app/")
+    elif got:
+        report("WARN", f"web app {got.get('version')} installed, this server expects "
+               f"{web.WEB_VERSION}", _cmd("python -m fision_server.prefetch"))
+    else:
+        report("WARN", "web app not installed: /app/ answers 404",
+               _cmd("python -m fision_server.prefetch"))
+
+
 def model_dirs():
     """Carpetas de pesos efectivas (FISION_MODELS_DIR rellena las tres)."""
     sys.path.insert(0, str(config.REPO_DIR))
@@ -235,6 +248,7 @@ def main():
     check_gpu()
     check_weights(models)
     check_accounts()
+    check_web()
     c = _counts
     print(f"\n{c['OK']} OK, {c['WARN']} WARN, {c['FAIL']} FAIL")
     sys.exit(1 if c["FAIL"] else 0)

@@ -60,3 +60,6 @@ Thumbs.db
 
 # ==== BITACORA LOCAL DE CLAUDE (NO SUBIR) ====
 CLAUDE.md
+
+# ==== CLIENTE WEB (lo baja prefetch / el Dockerfile) ====
+/webapp/

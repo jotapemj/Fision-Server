@@ -11,6 +11,7 @@ overview, installation and credits see the [README](../README.md).
 - [Configuration](#configuration)
 - [Authentication and user management](#authentication-and-user-management)
 - [API](#api)
+- [Web app](#web-app)
 - [Diagnostics](#diagnostics)
 - [Hardware detection and GPU gating](#hardware-detection-and-gpu-gating)
 - [Avatars](#avatars)
@@ -82,6 +83,9 @@ data/
     queue.json      live queue (queued + running), so jobs survive a restart
     avatars/        one profile image per account
     playlists/      <user>.json with the account's playlists; covers in <user>/
+
+webapp/             web client pinned by this server version (see Web app);
+                    inside the repository checkout, or in the image with Docker
 ```
 
 ## Requirements
@@ -125,6 +129,7 @@ All configuration is read from environment variables.
 | `FISION_LOG_LEVEL`       | `INFO`                   | Log verbosity.                                     |
 | `FISION_ADMIN_ALLOW`     | loopback, private ranges, Tailscale | Comma-separated networks allowed to reach `/admin`. Other clients get `403` even with an administrator token. |
 | `FISION_HOST`            | `0.0.0.0`                | Bind address.                                      |
+| `FORWARDED_ALLOW_IPS`    | `127.0.0.1`              | Read by uvicorn: addresses trusted to send `X-Forwarded-For`, usually the reverse proxy. See [Reverse proxy](#reverse-proxy-and-https). |
 | `FISION_PORT`            | `8000`                   | Bind port.                                         |
 | `FISION_MAX_UPLOAD_MB`   | `200`                    | Maximum upload size. Enforced before the request body is read. |
 | `FISION_MAX_AVATAR_MB`   | `2`                      | Maximum avatar and playlist cover upload size.     |
@@ -266,12 +271,9 @@ signing in with their usual credentials. The panel covers:
 Access needs both an administrator account and a client address inside
 `FISION_ADMIN_ALLOW`. The default covers loopback, private networks and
 Tailscale, so the panel is not reachable from the internet even if the API is.
-Behind a reverse proxy on the same host, either forward the client address
-(uvicorn trusts `X-Forwarded-For` from `127.0.0.1`) or block `/admin` at the
-proxy; otherwise every request appears to come from loopback. With the Docker
-image, uvicorn does not trust that header from the container network: block
-`/admin` at the proxy. Login attempts are also limited per client address, so
-without the real address all clients share one limit.
+Behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address or
+block `/admin` at the proxy; otherwise every request appears to come from the
+proxy (see [Reverse proxy and HTTPS](#reverse-proxy-and-https)).
 
 The panel is available in English, Spanish, Portuguese, Italian, French,
 German, Russian, Chinese, Catalan and Ukrainian. It follows the system language and
@@ -339,7 +341,8 @@ existing ones, so response timing does not reveal which accounts exist.
 
 ## API
 
-All routes except `/health` and `/login` require `Authorization: Bearer <token>`.
+All routes except `/health`, `/login` and the web app files under `/app/`
+require `Authorization: Bearer <token>`.
 
 Request bodies are checked before they are read. Upload routes (`POST /jobs`,
 `POST /library/{hash}/reprocess`, `PUT /auth/avatar`,
@@ -373,6 +376,7 @@ the header are accepted and left to the pipeline.
 | PUT    | `/auth/avatar`                | Upload avatar (multipart `file`, JPEG/PNG/WebP).|
 | DELETE | `/auth/avatar`                | Delete the caller's avatar.                     |
 | GET    | `/health`                     | Connectivity probe (no token).                  |
+| GET    | `/app/...`                    | [Web app](#web-app) files (no token).           |
 | GET    | `/server/info`                | GPU capabilities of the host (cached).          |
 | POST   | `/jobs`                       | Upload audio + `config_json`; enqueue or cache. |
 | POST   | `/library/{hash}/reprocess`   | Reprocess the stored input with a new config.   |
@@ -425,7 +429,8 @@ GET /jobs/{job_id}
 `cancelled`. `position` is the global queue position (1-based) of a queued
 job, `0` while it runs or waits for the GPU, and `null` once it has finished.
 `GET /jobs` lists the caller's live jobs as
-`{"job_id", "hash", "filename", "state", "position"}`.
+`{"job_id", "hash", "filename", "state", "position", "kind"}`, where `kind` is
+`separation` or `lyrics`.
 
 `error` is a human-readable English message and may change between releases;
 clients should branch on `error_code`, which is stable. Both are empty unless
@@ -475,6 +480,31 @@ It writes the stems (`.flac`) into `output_stems_dir` together with `beats.txt`,
 returns exit code 0 on success. All temporary output must stay inside the
 provided directory so interrupted runs can be cleaned up safely.
 
+## Web app
+
+The server hosts the [Fision web client](https://github.com/jotapemj/Fision-AppWeb)
+at `/app/`, on the same origin as the API. Each server version pins one web
+release (version and SHA-256 of its `fision-web.zip`, in
+`fision_server/web.py`), so server and web are always updated together. The
+Docker image includes it; a native installation downloads it with
+`prefetch` into `webapp/` in the repository checkout. Without it, `/app/`
+answers `404`.
+
+The browser features the client needs (audio worklets, shared memory for the
+multithreaded audio engine, service worker, installation as an app) work only
+in a secure context: HTTPS, or `localhost` on the server machine itself. Over
+plain HTTP, such as `http://192.168.1.10:8000/app/` on the local network or a
+Tailscale address without HTTPS, the browser disables them and the web app
+cannot play audio. The Android app is not affected. See
+[Reverse proxy and HTTPS](#reverse-proxy-and-https).
+
+Responses under `/app/` carry `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`, required for the multithreaded
+audio engine. Files under `assets/` have content hashes in their names and are
+cached for a year; everything else, the service worker included, is
+revalidated on every load, so a server update reaches the browser on the next
+visit.
+
 ## Diagnostics
 
 Two commands help set up and troubleshoot an installation. Run them with the
@@ -502,10 +532,12 @@ or `FAIL` (will not work), with the fix below each problem, and exits with
   yet.
 - Accounts: at least one user and one administrator, and whether a demo song
   is available for new accounts.
+- The web app: installed, and the version this server expects.
 
 `prefetch` downloads the separation models, the `beat_this` checkpoints and
 the Whisper model set in `FISION_WHISPER_MODEL` (several GB) into the model
-folders, and the [demo song](#demo-song) if `library/.demo/` is empty.
+folders, the [demo song](#demo-song) if `library/.demo/` is empty, and the
+[web app](#web-app) pinned by this version if it is missing or outdated.
 Without it, the first job downloads them and fails if the network drops.
 Files already present are skipped, so it can be run again after an
 interrupted download or a model change.
@@ -857,10 +889,12 @@ Every other variable in [Configuration](#configuration) goes in `.env`;
   is published on the host (`127.0.0.1:8000` by default). Docker adds its own
   firewall rules, so a host firewall such as UFW does not filter a port
   published on `0.0.0.0`.
-- **Client addresses:** connections made from the host itself reach the
-  server from the Docker bridge gateway, a private address inside
-  `FISION_ADMIN_ALLOW`. Publishing only on loopback or the Tailscale address
-  keeps the admin panel off other networks.
+- **Client addresses:** with the port published on loopback, connections
+  made from the host itself reach the server from the Docker bridge gateway,
+  a private address inside `FISION_ADMIN_ALLOW`; published on the Tailscale
+  address, they come from that address. Publishing only on loopback or the
+  Tailscale address keeps the admin panel off other networks.
+- **Web app:** included in the image; nothing to download.
 - **User:** the image runs as UID/GID 1000, and the host folders must be
   writable by it. `FISION_UID` and `FISION_GID` change it when building the
   image locally.
@@ -888,6 +922,29 @@ inner wall and the network layer as the outer one.
   host or in a container, its requests come from a private address inside
   `FISION_ADMIN_ALLOW`: block `/admin` in the tunnel configuration.
 - **WireGuard** - a single UDP port, invisible to unsolicited traffic.
+
+### Reverse proxy and HTTPS
+
+The server speaks plain HTTP; the web app needs HTTPS. On a Tailscale host,
+`tailscale serve` adds HTTPS with a valid certificate for the machine's
+`*.ts.net` name, reachable only from the tailnet:
+
+```bash
+sudo tailscale serve --bg http://<address>:8000   # the address the server listens on
+```
+
+The web app is then at `https://<machine>.<tailnet>.ts.net/app/`.
+
+A proxy hides the client address: every request appears to come from the
+proxy, which affects the login limits (all clients share one), the logs and
+the admin panel network check. Set `FORWARDED_ALLOW_IPS` to the address the
+proxy connects from, and uvicorn takes the client address from
+`X-Forwarded-For` instead. Trust only that address: any client it trusts can
+claim any address. The default, `127.0.0.1`, already covers a proxy on the
+same host in a native installation. With Docker, connections from the proxy
+come from the published address (`FISION_BIND`, for `tailscale serve` on the
+same host) or from the bridge gateway when published on loopback; put that
+address in `.env` and apply it with `docker compose up -d`.
 
 ## Roadmap
 

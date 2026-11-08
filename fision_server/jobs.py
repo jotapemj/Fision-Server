@@ -183,7 +183,7 @@ def list_active(user):
         if cur and cur["state"] in ("running", "waiting_gpu") and cur.get("user") == user:
             out.append({"job_id": cur["job_id"], "hash": cur["hash"],
                         "filename": cur["filename"], "state": cur["state"],
-                        "position": 0})
+                        "position": 0, "kind": cur.get("kind", "separation")})
         pos = 0
         for pid in _pending:
             j = _jobs.get(pid)
@@ -192,7 +192,7 @@ def list_active(user):
                 if j.get("user") == user:
                     out.append({"job_id": j["job_id"], "hash": j["hash"],
                                 "filename": j["filename"], "state": "queued",
-                                "position": pos})
+                                "position": pos, "kind": j.get("kind", "separation")})
         return out
 
 

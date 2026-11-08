@@ -10,12 +10,14 @@
     <img src="https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
     <img src="https://img.shields.io/badge/CUDA-76B900?logo=nvidia&logoColor=white" alt="CUDA">
     <a href="https://github.com/jotapemj/Fision-AppAndroid"><img src="https://img.shields.io/badge/App-Android-34A853?logo=android&logoColor=white" alt="App: Android"></a>
+    <a href="https://github.com/jotapemj/Fision-AppWeb"><img src="https://img.shields.io/badge/App-Web-4285F4?logo=googlechrome&logoColor=white" alt="App: Web"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-BD0000" alt="License: AGPL-3.0"></a>
   </p>
 </div>
 
 FisionServer is the self-hosted backend of Fision. A song sent from the
-[Fision app](https://github.com/jotapemj/Fision-AppAndroid) comes back as
+Fision app, for [Android](https://github.com/jotapemj/Fision-AppAndroid) or
+the [web](https://github.com/jotapemj/Fision-AppWeb), comes back as
 separate stems with beats, chords, metronomes and lyrics, all processed on
 the server's own GPU. Accounts, library and models stay on the host that runs
 it.
@@ -38,6 +40,7 @@ it.
 * **Safe reprocessing**: a failed or cancelled job never destroys the
   previous result.
 * **Shared GPU queue** that waits for free VRAM and survives restarts.
+* **Web app** served by the server itself at `/app/`.
 * **Admin panel** in the browser, in 10 languages.
 * **Command line** to run the pipeline without the server.
 
@@ -61,7 +64,11 @@ it.
    ```
 
 4. Install the [Fision app](https://github.com/jotapemj/Fision-AppAndroid) and
-   sign in with the server address and the account.
+   sign in with the server address and the account. Or open the web app at
+   `/app/` on the server. The web app needs HTTPS, which `tailscale serve`
+   provides, or `localhost` on the server itself; over plain HTTP on the
+   local network the browser blocks its audio engine (see
+   [Reverse proxy and HTTPS](docs/REFERENCE.md#reverse-proxy-and-https)).
 
 On a [native install](#native-install) the same commands run without the
 `docker compose exec fision` prefix, and `python -m fision_server.run`
@@ -233,6 +240,9 @@ pip install torch==2.13.0 torchaudio==2.11.0 torchvision==0.28.0 --index-url htt
 pip install -r requirements.txt -c constraints.txt
 ```
 
+After `git pull`, run `python -m fision_server.prefetch` again: each server
+version pins its own web app, which a native install downloads.
+
 ### Choosing the PyTorch index
 
 The index depends on the GPU generation and the NVIDIA driver. All of them
@@ -328,6 +338,13 @@ before redistributing.
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
   Fision distributes it separated into stems, with its analysis files and
   synchronized lyrics. Downloaded by `prefetch`; not part of the repository.
+
+**Web app**
+
+- [Fision-AppWeb](https://github.com/jotapemj/Fision-AppWeb): the web client,
+  a separate project under GPL-3.0-or-later with its own credits. The Docker
+  image includes the release pinned by each server version; `prefetch`
+  downloads it on a native install.
 
 **Sounds**
 

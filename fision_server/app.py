@@ -23,6 +23,9 @@ API HTTP de Fision. La app movil habla con estos endpoints.
   GET/PUT/DELETE  /playlists/{id}         lee / sustituye / borra
   GET/PUT/DELETE  /playlists/{id}/cover   cover (como el avatar)
 
+  --- cliente web (web.py; ficheros sin token, COOP/COEP) ---
+  GET  /app/...                  la web fijada por esta version del server
+
   --- admin (admin.py; solo redes ADMIN_ALLOW + role=admin) ---
   GET  /admin                    pagina del panel
   ...  /admin/api/...            usuarios, bibliotecas (metadatos), trabajos,
@@ -37,13 +40,13 @@ import time
 import tempfile
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from . import (config, library, jobs, users, security, log, avatars, gpu,
-               ratelimit, playlists, admin, limits, __version__)
+               ratelimit, playlists, admin, limits, web, __version__)
 from .auth import current_user, bearer_token
 
 
@@ -89,10 +92,16 @@ async def access_log(request: Request, call_next):
     # El navegador no adivina tipos (portadas de tags arbitrarias) y el panel
     # no se deja enmarcar en otra web
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    if request.url.path.startswith("/admin"):
+    path = request.url.path
+    if path.startswith("/admin"):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+    elif path == "/app" or path.startswith("/app/"):
+        # SharedArrayBuffer (motor WASM con hilos) exige aislamiento de origen
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+        response.headers.setdefault("X-Frame-Options", "DENY")
     ms = (time.perf_counter() - start) * 1000
     log.access_line(request.method, request.url.path, response.status_code, user, ms)
     return response
@@ -106,6 +115,39 @@ app.add_middleware(limits.BodyLimit)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ------------------------------------------------------------- cliente web ----
+# Tipos explicitos: los de mimetypes dependen del sistema (y slim no trae)
+_WEB_TYPES = {
+    ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
+    ".css": "text/css", ".json": "application/json", ".wasm": "application/wasm",
+    ".webmanifest": "application/manifest+json", ".png": "image/png",
+    ".webp": "image/webp", ".svg": "image/svg+xml", ".wav": "audio/wav",
+    ".otf": "font/otf", ".ttf": "font/ttf", ".woff2": "font/woff2",
+    ".glb": "model/gltf-binary", ".txt": "text/plain",
+}
+
+
+@app.get("/app", include_in_schema=False)
+def web_root():
+    return RedirectResponse("/app/", status_code=308)
+
+
+@app.get("/app/{name:path}", include_in_schema=False)
+def web_file(name: str):
+    """Ficheros de la web. Sin token: la app pide el login ella misma."""
+    root = web.WEB_DIR.resolve()
+    f = (root / (name or "index.html")).resolve()
+    if (root not in f.parents or not f.is_file()
+            or any(p.startswith(".") for p in f.relative_to(root).parts)):
+        raise HTTPException(404, "Not found" if root.is_dir() else "Web app not installed")
+    # assets/ lleva hash en el nombre: cache larga. El resto (index, sw.js,
+    # manifest...) revalida para que una version nueva se vea al momento
+    cache = ("public, max-age=31536000, immutable" if name.startswith("assets/")
+             else "no-cache")
+    return FileResponse(f, media_type=_WEB_TYPES.get(f.suffix.lower()),
+                        headers={"Cache-Control": cache})
 
 
 # --------------------------------------------------------------- server info ----
