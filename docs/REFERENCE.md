@@ -207,7 +207,7 @@ There is **no public registration**. Accounts are created from the host shell,
 and credentials are distributed out of band.
 
 ```bash
-python -m fision_server.useradd    <username> [--admin] [--no-demo]  # create account (prompts for a password)
+python -m fision_server.useradd    <username> [--admin] [--no-demo]  # create account (prompts for a password; Enter generates one)
 python -m fision_server.usermod    <username> --admin|--no-admin  # grant or remove the admin role
 python -m fision_server.userpasswd <username>   # reset a password (invalidates old sessions)
 python -m fision_server.userdel    <username> [--purge]  # delete an account; --purge also removes its library, playlists and avatar
@@ -217,6 +217,15 @@ These commands read the same environment variables as the server. Run them
 with the service's `FISION_DATA` and `FISION_LIBRARY` (for systemd:
 `systemctl show fision -p Environment`); otherwise they act on the default
 `./data` and `./library`. `useradd` and `userdel` print the paths they use.
+
+At the password prompt of `useradd`, pressing Enter generates a random
+password and prints it once. Without a terminal, such as from a script, the
+password is read from standard input: an empty line also generates one. With
+Docker, add `-T` so the input reaches the command:
+
+```bash
+echo | docker compose exec -T fision python -m fision_server.useradd alice
+```
 
 The first account created on a fresh installation is an administrator even
 without `--admin`, so the admin panel always has an owner. The last
@@ -407,6 +416,51 @@ Request validation on `POST /jobs` and `POST /library/{hash}/reprocess`:
   included.
 - Files above `FISION_MAX_UPLOAD_MB` return `413`.
 
+### Uploading a song
+
+`POST /jobs` takes a multipart form with two fields: `file`, the audio with
+its original file name, and `config_json`, a JSON object as text (default
+`{}`). `POST /library/{hash}/reprocess` takes only `config_json`.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN"      -F "file=@song.mp3"      -F 'config_json={"device": "cuda", "sep": {"mode": "classic"}}'      http://<host>:8000/jobs
+```
+
+Top-level keys of `config_json`:
+
+| Key      | Values            | Default | Description |
+|----------|-------------------|---------|-------------|
+| `device` | `cuda`, `cpu`     | `cpu`   | Where the job runs. Without `cuda` the job runs on the CPU even when the server has a GPU; on a server without one, `cuda` falls back to the CPU. |
+| `sep`    | object            | -       | Separation options, below. An object without `sep` is read as the separation options themselves, and runs on the CPU. |
+
+Keys of `sep`:
+
+| Key | Values | Default | Description |
+|-----|--------|---------|-------------|
+| `mode` | `classic`, `personalized` | `personalized` | `classic`: fixed set of stems. `personalized`: the stems chosen in `stems`. |
+| `preset` | `2stem` | - | `classic` only. `2stem` gives `vocals` and `instrumental`; anything else gives `vocals`, `bass`, `drums` and `other`. |
+| `vocals` | `single`, `split` | `single` | `split` separates lead vocals (`vocals.flac`) from backing vocals (`vocals2.flac`). |
+| `stems.<name>.enabled` | `true`, `false` | `false` | `personalized` only. `<name>` is `bass`, `drums`, `guitar`, `piano` or `brass` (saved as `winds.flac`). |
+| `stems.drums.variant` | `full`, `split` | `full` | `split` divides the drums into `kick`, `snare`, `toms`, `hh`, `ride`, `crash` and `perc`. |
+
+In `personalized` mode, whatever the chosen stems leave out is saved as
+`other.flac`; with no stem enabled the result is `vocals` and `instrumental`.
+Every job, whatever its configuration, also produces beats, downbeats,
+chords, metronomes, tags and cover art. Unknown keys are ignored but stored:
+a cache hit on `POST /jobs` needs a stored song with exactly the same
+`config_json`, and a different one reprocesses the song.
+
+Example used by the Android app (lead and backing vocals, bass, drums and
+winds):
+
+```json
+{"device": "cuda",
+ "sep": {"mode": "personalized", "vocals": "split",
+         "stems": {"bass": {"enabled": true}, "drums": {"enabled": true, "variant": "full"},
+                   "guitar": {"enabled": false}, "piano": {"enabled": false},
+                   "brass": {"enabled": true}}}}
+```
+
 ### Jobs and library entries
 
 `POST /jobs` returns `{"hash", "job_id", "state", "cached"}`; on a cache hit
@@ -547,6 +601,9 @@ interrupted download or a model change.
 The server is the single source of truth for GPU availability. At startup it
 queries `nvidia-smi` once and caches the result; clients read that snapshot from
 `GET /server/info` and decide which `device` to request per job.
+
+Only the first GPU is used and measured. On a machine with several, the
+others stay idle and their VRAM is not reported.
 
 ```json
 GET /server/info
@@ -886,7 +943,9 @@ Every other variable in [Configuration](#configuration) goes in `.env`;
 - **Commands:** the CLIs run inside the container, for example
   `docker compose exec fision python -m fision_server.useradd alice`.
 - **Address:** `FISION_BIND` and `FISION_PUBLISH_PORT` choose where the port
-  is published on the host (`127.0.0.1:8000` by default). Docker adds its own
+  is published on the host (`127.0.0.1:8000` by default). `FISION_HOST` and
+  `FISION_PORT` are fixed inside the container (`0.0.0.0:8000`) and ignored
+  in `.env`. Docker adds its own
   firewall rules, so a host firewall such as UFW does not filter a port
   published on `0.0.0.0`.
 - **Client addresses:** with the port published on loopback, connections
@@ -934,6 +993,13 @@ sudo tailscale serve --bg http://<address>:8000   # the address the server liste
 ```
 
 The web app is then at `https://<machine>.<tailnet>.ts.net/app/`.
+
+Without HTTPS, an SSH tunnel also works, since the browser treats `localhost`
+as secure:
+
+```bash
+ssh -L 8000:<address>:8000 <user>@<server>    # then open http://localhost:8000/app/
+```
 
 A proxy hides the client address: every request appears to come from the
 proxy, which affects the login limits (all clients share one), the logs and
