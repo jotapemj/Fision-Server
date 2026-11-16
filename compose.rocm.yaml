@@ -1,0 +1,25 @@
+# AMD GPU (ROCm, experimental). Linux only; the host needs just the amdgpu
+# kernel driver. There is no published image: Compose builds it locally from
+# this checkout (clone with --recurse-submodules), and rebuilds on each `up`,
+# which reuses the build cache.
+#
+#   echo "FISION_RENDER_GID=$(getent group render | cut -d: -f3)" >> .env
+#   docker compose -f compose.yaml -f compose.rocm.yaml up -d
+#
+# Lyrics (Whisper) always run on the CPU: CTranslate2 has no ROCm build.
+
+services:
+  fision:
+    image: fision-server:rocm
+    pull_policy: build
+    build:
+      args:
+        TORCH_INDEX: rocm7.2
+    deploy: !reset {}
+    # Dispositivos de computo de ROCm: los grupos dan permiso de acceso
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - "${FISION_RENDER_GID:?set FISION_RENDER_GID in .env, see the comment above}"

@@ -192,6 +192,8 @@ Images are published for each GPU generation (see
 * `cpu`: no NVIDIA GPU, started with
   `docker compose -f compose.yaml -f compose.cpu.yaml up -d`.
 
+AMD cards have no published image; see [AMD GPUs](#amd-gpus-experimental).
+
 Each release is also tagged with its version, such as `2.0.0-cu129`.
 
 To update:
@@ -216,6 +218,40 @@ To build the image locally instead, clone with `--recurse-submodules` (the
 BTC weights are needed) and run `docker compose build`. A build downloads
 several GB and needs about 40 GB of free disk; `docker builder prune`
 frees the build cache afterwards.
+
+### AMD GPUs (experimental)
+
+AMD cards run through ROCm, on Linux only. Compose builds the image from the
+repository, so the clone needs `--recurse-submodules`. The host needs the
+`amdgpu` kernel driver, which mainstream distributions ship; ROCm itself
+comes inside the image.
+
+* Supported architectures: RX 6800 and 6900 (`gfx1030`), RX 7000
+  (`gfx1100` to `gfx1102`) and RX 9000 (`gfx1200`, `gfx1201`). Other RX 6000
+  cards may work with `HSA_OVERRIDE_GFX_VERSION=10.3.0` in `.env`.
+* Lyrics always run on the CPU: Whisper's engine has no ROCm build.
+* Not tested on real AMD hardware yet. Reports are welcome as issues.
+
+> [!WARNING]
+> The ROCm image is large: about 25 GB, against 14 GB for the NVIDIA one,
+> because PyTorch for ROCm ships its GPU libraries for every supported
+> architecture. The first build downloads about 7 GB and needs around 60 GB
+> of free disk for the build cache. `docker builder prune` frees that space,
+> but the next update then rebuilds the image from scratch.
+
+```bash
+git clone --recurse-submodules https://github.com/jotapemj/Fision-Server.git
+cd Fision-Server
+cp .env.example .env
+echo "FISION_RENDER_GID=$(getent group render | cut -d: -f3)" >> .env
+mkdir -p data library models
+docker compose -f compose.yaml -f compose.rocm.yaml up -d
+```
+
+The first `up` builds the image (it downloads about 7 GB). To update,
+`git pull` and run the same `up` again; it rebuilds only what changed.
+`doctor` reports the card, the ROCm version and whether its architecture is
+supported.
 
 ### Native install
 
@@ -253,7 +289,10 @@ and Whisper share one set of CUDA libraries.
   This is the validated configuration.
 * **`cu126`**: Maxwell, Pascal and Volta (GTX 9xx, GTX 10xx, V100), driver
   560 or newer. Not tested on real hardware.
-* **`cpu`**: no NVIDIA GPU. Much slower.
+* **`cpu`**: no GPU. Much slower.
+* **`rocm7.2`**: AMD cards, experimental (see
+  [AMD GPUs](#amd-gpus-experimental)). The user running the server must be in
+  the `render` and `video` groups.
 
 Check the driver with `nvidia-smi` and the result with
 `python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.

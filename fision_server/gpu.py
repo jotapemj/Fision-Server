@@ -6,15 +6,19 @@ Deteccion de GPU. Fuente unica de verdad: el server, no el cliente.
 - VRAM libre en VIVO cuando el worker va a lanzar un job (para el gate del
   minimo de 4 GB).
 
-Usa nvidia-smi (no torch): rapido, no arrastra dependencias pesadas y no
-requiere warm-up de CUDA. Si el binario no esta -> sin GPU.
+Sin torch (rapido, sin warm-up): NVIDIA por nvidia-smi; AMD (ROCm,
+experimental) por sysfs del driver amdgpu, solo si existe /dev/kfd (el
+dispositivo de computo de ROCm; sin el, una iGPU Ryzen no cuenta). Torch
+para ROCm ve la tarjeta como "cuda": el resto del server no distingue.
 
 Ademas, al arrancar, una sonda en proceso aparte (gpu_probe) comprueba que
 torch y Whisper pueden usar CUDA: sin ella, un driver viejo o un torch de CPU
 mandaban todo a CPU en silencio. Resultado en gpu_usable / gpu_problem.
 """
+import os
 import sys
 import json
+import glob
 import threading
 import subprocess
 
@@ -25,6 +29,7 @@ PROBE_TIMEOUT_SEC = 180
 
 _cache = {
     "gpu": False,
+    "gpu_vendor": "",        # nvidia | amd | "" (sin GPU)
     "gpu_name": "",
     "vram_total_mb": 0,
     "driver": "",
@@ -32,6 +37,10 @@ _cache = {
     "gpu_problem": "",
 }
 _whisper_ok = None
+_amd_dev = None              # /sys/class/drm/cardN/device de la AMD detectada
+
+_KFD = "/dev/kfd"
+_DRM = "/sys/class/drm"
 
 
 def _query(fields, timeout=3):
@@ -48,18 +57,58 @@ def _query(fields, timeout=3):
     return [x.strip() for x in r.stdout.splitlines()[0].split(",")]
 
 
+def _read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _amd_card():
+    """La tarjeta AMD con mas VRAM en sysfs (la dGPU, no la iGPU), o None."""
+    if not os.path.exists(_KFD):
+        return None
+    cards = []
+    for dev in glob.glob(f"{_DRM}/card[0-9]*/device"):
+        if _read(f"{dev}/vendor") != "0x1002":
+            continue
+        try:
+            total = int(_read(f"{dev}/mem_info_vram_total"))
+        except ValueError:
+            continue
+        cards.append((total, dev))
+    return max(cards)[1] if cards else None
+
+
+def _amd_vram(dev, field):
+    """VRAM en MB de sysfs (field: total | used). None si no se puede leer."""
+    try:
+        return int(_read(f"{dev}/mem_info_vram_{field}")) // (1024 * 1024)
+    except ValueError:
+        return None
+
+
 def detect():
     """Detecta la GPU y cachea. Llamar UNA vez al arrancar el server."""
+    global _amd_dev
     row = _query("name,memory.total,driver_version")
-    if not row or len(row) < 3:
+    if row and len(row) >= 3:
+        _cache.update(gpu=True, gpu_vendor="nvidia", gpu_name=row[0], driver=row[2])
+        try:
+            _cache["vram_total_mb"] = int(row[1])
+        except ValueError:
+            _cache["vram_total_mb"] = 0
         return
-    _cache["gpu"] = True
-    _cache["gpu_name"] = row[0]
-    try:
-        _cache["vram_total_mb"] = int(row[1])
-    except ValueError:
-        _cache["vram_total_mb"] = 0
-    _cache["driver"] = row[2]
+    dev = _amd_card()
+    if dev is None:
+        return
+    _amd_dev = dev
+    # Nombre comercial: la sonda lo afina con torch; sysfs solo a veces lo trae
+    _cache.update(gpu=True, gpu_vendor="amd",
+                  gpu_name=_read(f"{dev}/product_name") or "AMD GPU",
+                  vram_total_mb=_amd_vram(dev, "total") or 0,
+                  driver=_read("/sys/module/amdgpu/version") or f"kernel {os.uname().release}")
 
 
 def info():
@@ -75,6 +124,9 @@ def vram_free_mb():
     """VRAM libre AHORA (en vivo, no cache). 0 si no hay GPU o si falla la query."""
     if not _cache["gpu"]:
         return 0
+    if _cache["gpu_vendor"] == "amd":
+        used = _amd_vram(_amd_dev, "used")
+        return max(_cache["vram_total_mb"] - used, 0) if used is not None else 0
     row = _query("memory.free")
     if not row:
         return 0
@@ -94,13 +146,20 @@ def _probe():
         probe = json.loads(r.stdout.strip().splitlines()[-1])
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as e:
         probe = {"error": f"probe: {e}"}
+    vendor = _cache["gpu_vendor"]
+    if vendor == "amd" and not probe.get("torch_hip"):
+        # torch sin ROCm (imagen cpu/cu129): la AMD no se usara, como sin GPU
+        _cache.update(gpu=False, gpu_vendor="", gpu_name="", vram_total_mb=0, driver="")
+    elif vendor == "amd" and probe.get("device_name"):
+        _cache["gpu_name"] = probe["device_name"]
     usable, problem = assess(_cache["gpu"], probe)
     _cache["gpu_usable"] = usable
     _cache["gpu_problem"] = problem
     _whisper_ok = usable and problem != "whisper_no_cuda"
-    log.event("gpu.check", usable=usable, problem=problem,
+    log.event("gpu.check", usable=usable, problem=problem, vendor=_cache["gpu_vendor"],
               torch=probe.get("torch"), cuda=probe.get("torch_cuda"),
-              cudnn=probe.get("cudnn"), capability=probe.get("capability"))
+              hip=probe.get("torch_hip"), cudnn=probe.get("cudnn"),
+              capability=probe.get("capability"))
     if problem:
         log.event("gpu.unusable", problem=problem, error=probe.get("error"))
 
@@ -112,7 +171,7 @@ def start_probe():
 
 def usable():
     """¿La separacion puede ir en GPU? Mientras la sonda no acaba, manda
-    nvidia-smi (comportamiento de siempre)."""
+    la deteccion (nvidia-smi o sysfs)."""
     u = _cache["gpu_usable"]
     return _cache["gpu"] if u is None else u
 

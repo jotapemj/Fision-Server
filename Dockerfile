@@ -2,7 +2,8 @@
 #
 #   docker build --build-arg TORCH_INDEX=cu129 -t fision-server .
 #
-# TORCH_INDEX: cu129 (RTX 20xx and newer), cu126 (Pascal and older), cpu.
+# TORCH_INDEX: cu129 (RTX 20xx and newer), cu126 (Pascal and older), cpu,
+# rocm7.2 (AMD, experimental: see compose.rocm.yaml).
 # The repository must be cloned with --recurse-submodules (BTC weights).
 # Model weights are not in the image: they go to the /models volume
 # (python -m fision_server.prefetch, or on first use).

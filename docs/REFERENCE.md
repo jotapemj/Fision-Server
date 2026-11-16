@@ -90,7 +90,7 @@ webapp/             web client pinned by this server version (see Web app);
 
 ## Requirements
 
-The heavy stack (PyTorch with the CUDA index, `audio-separator`, `beat_this`,
+The heavy stack (PyTorch with the CUDA or ROCm index, `audio-separator`, `beat_this`,
 BTC, ffmpeg) is installed as described in the [README](../README.md#install).
 The server itself adds the following, pinned in the root `requirements.txt`
 (transitive dependencies in `constraints.txt`):
@@ -579,7 +579,7 @@ or `FAIL` (will not work), with the fix below each problem, and exits with
 
 - Python version and `ffmpeg`.
 - The data, library and model folders: writable, and free space.
-- The GPU as seen by `nvidia-smi`, PyTorch and Whisper, with the codes of
+- The GPU as seen by `nvidia-smi` (or the `amdgpu` driver), PyTorch and Whisper, with the codes of
   [Hardware detection](#hardware-detection-and-gpu-gating); a PyTorch built
   for a CUDA version other than 12, and leftovers such as `onnxruntime-gpu`
   or two `nvidia-cudnn` packages.
@@ -601,7 +601,9 @@ interrupted download or a model change.
 ## Hardware detection and GPU gating
 
 The server is the single source of truth for GPU availability. At startup it
-queries `nvidia-smi` once and caches the result; clients read that snapshot from
+detects the GPU once and caches the result: `nvidia-smi` for NVIDIA cards, or
+the `amdgpu` driver's entries under `/sys/class/drm` for AMD cards (see
+[AMD GPUs](#amd-gpus-experimental)). Clients read that snapshot from
 `GET /server/info` and decide which `device` to request per job.
 
 Only the first GPU is used and measured. On a machine with several, the
@@ -611,6 +613,7 @@ others stay idle and their VRAM is not reported.
 GET /server/info
 {
   "gpu": true,
+  "gpu_vendor": "nvidia",
   "gpu_name": "NVIDIA GeForce RTX 3060",
   "vram_total_mb": 12288,
   "driver": "550.54.15",
@@ -623,34 +626,36 @@ GET /server/info
 ```
 
 When `gpu` is `false`, the other GPU fields are empty and `vram_free_mb` is
-`0`. `gpu_name`, `vram_total_mb` and `driver` come from the startup cache;
+`0`. `gpu_vendor` is `nvidia` or `amd`. `gpu_name`, `vram_total_mb` and
+`driver` come from the startup cache;
 `vram_free_mb` is queried live on every request. `vram_min_mb` is the value of
 `FISION_GPU_MIN_VRAM_MB`, the threshold used by the job gate described below.
 Clients can compare both fields to warn the user before submitting a CUDA job
 (`vram_free_mb < vram_min_mb` means the job would enter `waiting_gpu`).
-`nvidia-smi` is queried without loading PyTorch, so the endpoint is cheap and
-does not warm up CUDA.
+Detection does not load PyTorch, so the endpoint is cheap and does not warm up
+the GPU.
 The `version` field carries the server's own release (see
 [Versioning](#versioning)).
 
-`nvidia-smi` only proves that a card is present. A driver that is too old, a
+Detection only proves that a card is present. A driver that is too old, a
 CPU build of PyTorch or a GPU outside the architectures of the installed wheel
 would still send every job to the CPU. Right after startup the server
 therefore runs a probe in a separate process that imports PyTorch and
 CTranslate2 (Whisper) and checks that both can use CUDA. It takes a few
-seconds; until it finishes, `gpu_usable` is `null` and the `nvidia-smi` result
+seconds; until it finishes, `gpu_usable` is `null` and the detection result
 applies. `gpu_problem` is empty or one of these stable codes:
 
 - `torch_error`: PyTorch cannot be imported.
-- `torch_no_cuda`: `nvidia-smi` sees a GPU but PyTorch does not (driver too
-  old, or the CPU build of PyTorch).
+- `torch_no_cuda`: a GPU is detected but PyTorch cannot use it (driver too
+  old, the CPU build of PyTorch, or no access to the AMD compute device).
 - `arch_unsupported`: the GPU is not among the architectures of the installed
-  PyTorch (for example a Pascal card with the `cu129` index).
+  PyTorch (for example a Pascal card with the `cu129` index, or an AMD card
+  outside the ROCm build).
 - `whisper_no_cuda`: separation uses the GPU but Whisper cannot; lyrics run on
-  the CPU. `gpu_usable` stays `true`.
-- `smi_missing`: PyTorch sees CUDA but `nvidia-smi` is not available, so free
-  VRAM cannot be measured (typical of a container without the `utility`
-  capability).
+  the CPU. `gpu_usable` stays `true`. Always the case on AMD cards.
+- `smi_missing`: PyTorch sees the GPU but free VRAM cannot be measured:
+  `nvidia-smi` is not available (typical of a container without the `utility`
+  capability), or the `amdgpu` driver does not report VRAM.
 
 When `gpu_usable` is `false`, jobs that request `cuda` run on the CPU, the
 admin panel shows a warning and the `gpu.unusable` event is logged. Run
@@ -669,9 +674,31 @@ processing still completes; the `job.gpu_fallback` event records the reason
 
 Job states exposed to clients: `queued`, `running`, `waiting_gpu`, `done`,
 `error`, `cancelled`. A `waiting_gpu` job counts as position `0` in the queue
-and can be cancelled the same way as a running one. Jobs share a `kind` field
-internally (`separation` or `lyrics`); it is not exposed in the API but
-drives the worker's dispatch and VRAM threshold.
+and can be cancelled the same way as a running one. Each job has a `kind`
+(`separation` or `lyrics`), listed by `GET /jobs`, which also selects the
+worker's dispatch and VRAM threshold.
+
+### AMD GPUs (experimental)
+
+AMD cards run through ROCm on Linux, with the `rocm7.2` build of PyTorch. That
+build exposes the card through the same `cuda` device as NVIDIA, so jobs
+request `"device": "cuda"` on either vendor and the rest of the server treats
+both alike. Differences:
+
+- **Detection:** an AMD card counts only when `/dev/kfd`, the ROCm compute
+  device, exists, and only with a ROCm build of PyTorch. With any other build
+  the card is ignored and the server runs as without a GPU. Free VRAM is read
+  from `mem_info_vram_used` in sysfs. With several AMD cards, VRAM is read from
+  the one with the most memory, assumed to be the one PyTorch uses
+  (`HIP_VISIBLE_DEVICES` selects it otherwise).
+- **Lyrics:** CTranslate2, the engine behind Whisper, has no ROCm build, so
+  lyrics always run on the CPU and `gpu_problem` reports `whisper_no_cuda`.
+- **Architectures:** the card must be among those of the ROCm build of
+  PyTorch, otherwise the probe reports `arch_unsupported`. Cards close to a
+  supported one can borrow its kernels with `HSA_OVERRIDE_GFX_VERSION` (for
+  example `10.3.0` on RX 6000 cards other than the 6800 and 6900); the probe
+  then checks the overridden architecture. This is untested.
+- **Status:** not tested on real AMD hardware. Reports are welcome as issues.
 
 ## Avatars
 
@@ -962,6 +989,11 @@ Every other variable in [Configuration](#configuration) goes in `.env`;
 - **Logs:** `docker compose logs fision`, in UTC unless `TZ` is set.
 - **Without a GPU:** `docker compose -f compose.yaml -f compose.cpu.yaml up -d`
   uses the CPU image and drops the GPU reservation.
+- **AMD GPU (experimental):** `compose.rocm.yaml` builds the image locally
+  with the `rocm7.2` PyTorch index, drops the NVIDIA reservation, maps
+  `/dev/kfd` and `/dev/dri`, and adds the `video` group and the host's render
+  group (`FISION_RENDER_GID` in `.env`). See
+  [AMD GPUs](#amd-gpus-experimental).
 
 ### Network exposure
 

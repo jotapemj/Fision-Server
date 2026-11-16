@@ -1050,7 +1050,10 @@ def analyze_chords_file(chord_file_dir: str):
 # ---------- AUDIO SEPARATOR MODEL ----------
 
 def _gpu_visible():
-    """Comprobacion barata: ¿hay GPU NVIDIA? No carga torch."""
+    """Comprobacion barata: ¿hay GPU? No carga torch. NVIDIA por nvidia-smi,
+    AMD (ROCm) por /dev/kfd, su dispositivo de computo."""
+    if os.path.exists("/dev/kfd"):
+        return True
     try:
         r = subprocess.run(["nvidia-smi", "-L"],
                            stdout=subprocess.PIPE,
@@ -1077,6 +1080,7 @@ def start_audio_separator(input_file, output_dir, sep_config, device="cpu"):
     env = child_env()
     if device != "cuda":
         env["CUDA_VISIBLE_DEVICES"] = "-1"   # CPU de verdad
+        env["HIP_VISIBLE_DEVICES"] = "-1"    # idem con ROCm
 
     mode = sep_config.get("mode", "?")
     print(f"Starting audio-separator ({mode}, {device}) in the background...")

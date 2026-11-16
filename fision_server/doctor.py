@@ -33,6 +33,22 @@ _GPU_HINTS = {
                    "measured. In Docker: NVIDIA_DRIVER_CAPABILITIES=compute,utility",
 }
 
+# AMD (ROCm, experimental): otros arreglos
+_GPU_HINTS_AMD = {
+    "torch_no_cuda": "torch does not see the AMD GPU: check that the user is in the "
+                     "render and video groups, and that torch comes from the rocm7.2 index",
+    "arch_unsupported": "this GPU is not in the ROCm build of torch. RX 6000 cards other "
+                        "than the 6800/6900 may work with HSA_OVERRIDE_GFX_VERSION=10.3.0",
+    "whisper_no_cuda": "expected on AMD: Whisper has no ROCm build, lyrics run on the CPU",
+    "smi_missing": "torch sees the GPU but its VRAM cannot be read from "
+                   "/sys/class/drm (amdgpu driver)",
+}
+
+_GPU_HINTS_AMD_DOCKER = {
+    "torch_no_cuda": "the container does not see the AMD GPU: use compose.rocm.yaml "
+                     "(maps /dev/kfd and /dev/dri) and set FISION_RENDER_GID in .env",
+}
+
 # En Docker: arreglos del lado del host
 _GPU_HINTS_DOCKER = {
     "torch_no_cuda": "the container does not see the GPU: install the NVIDIA Container "
@@ -117,30 +133,54 @@ def check_paths(models):
         _writable(f"weights ({label})", path)
 
 
+def _gpu_hint(problem, amd):
+    """Arreglo de un problema de GPU: el mas concreto (AMD/NVIDIA, Docker/nativo)."""
+    tables = ([_GPU_HINTS_AMD_DOCKER] if amd and config.IN_DOCKER else []) \
+        + ([_GPU_HINTS_AMD] if amd else []) \
+        + ([_GPU_HINTS_DOCKER] if config.IN_DOCKER and not amd else []) \
+        + [_GPU_HINTS]
+    return next(t[problem] for t in tables if problem in t)
+
+
 def check_gpu():
     print("\nGPU")
     gpu.detect()
     info = gpu.info()
-    if info["gpu"]:
-        report("OK", f"nvidia-smi: {info['gpu_name']}, {info['vram_total_mb']} MB, "
-               f"driver {info['driver']}")
-    else:
-        report("WARN", "nvidia-smi sees no NVIDIA GPU: everything runs on the CPU (slow)",
-               "if the host has one: install the NVIDIA Container Toolkit and use "
-               "the GPU image" if config.IN_DOCKER else "")
-
     probe = probe_gpu()
+    amd = info["gpu_vendor"] == "amd"
+    if amd and not probe["torch_hip"]:
+        # torch sin ROCm: la AMD no se usa, como sin GPU (igual que gpu._probe)
+        info, amd = {**info, "gpu": False}, False
+    if info["gpu"]:
+        if amd:
+            name = probe["device_name"] or info["gpu_name"]
+            report("OK", f"AMD GPU (experimental): {name}, {info['vram_total_mb']} MB, "
+                   f"driver {info['driver']}")
+        else:
+            report("OK", f"nvidia-smi: {info['gpu_name']}, {info['vram_total_mb']} MB, "
+                   f"driver {info['driver']}")
+    else:
+        report("WARN", "no usable GPU found: everything runs on the CPU (slow)",
+               "NVIDIA: install the NVIDIA Container Toolkit and use the GPU image; "
+               "AMD: see compose.rocm.yaml" if config.IN_DOCKER else "")
+
     if probe["torch"]:
-        cuda = probe["torch_cuda"] or "cpu"
-        report("OK", f"torch {probe['torch']} (CUDA {cuda}, cuDNN {probe['cudnn'] or '-'})")
+        if probe["torch_hip"]:
+            report("OK", f"torch {probe['torch']} (ROCm {probe['torch_hip']})")
+        else:
+            cuda = probe["torch_cuda"] or "cpu"
+            report("OK", f"torch {probe['torch']} (CUDA {cuda}, cuDNN {probe['cudnn'] or '-'})")
     _, problem = assess(info["gpu"], probe)
     if problem:
         level = "WARN" if problem == "whisper_no_cuda" else "FAIL"
-        report(level, f"GPU not usable: {problem}"
-               + (f" ({probe['error']})" if probe["error"] else ""),
-               (config.IN_DOCKER and _GPU_HINTS_DOCKER.get(problem)) or _GPU_HINTS[problem])
-    elif probe["cuda_available"]:
-        report("OK", f"torch and Whisper use the GPU (sm {probe['capability']})")
+        # En AMD el error de CTranslate2 (sin CUDA) es lo esperado: no se muestra
+        error = probe["error"] if probe["error"] and not (amd and problem == "whisper_no_cuda") else ""
+        report(level, f"GPU not usable: {problem}" + (f" ({error})" if error else ""),
+               _gpu_hint(problem, amd))
+    if probe["cuda_available"] and problem in ("", "whisper_no_cuda"):
+        what = "torch uses" if problem else "torch and Whisper use"
+        arch = probe["capability"] if amd else f"sm {probe['capability']}"
+        report("OK", f"{what} the GPU ({arch})")
 
     # Una sola version de CUDA: Whisper solo existe para CUDA 12
     major = (probe["torch_cuda"] or "").split(".")[0]
