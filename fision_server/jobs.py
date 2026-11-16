@@ -33,7 +33,7 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
-from . import config, library, pipeline, log, gpu
+from . import config, library, runner, log, gpu
 
 _jobs = {}                       # job_id -> dict
 _pending = []                    # ids en orden de llegada (los 'queued')
@@ -246,7 +246,7 @@ def cancel_job(jid, user=None):
     if to_stop:
         # Fuera del lock y en hilo: stop() puede esperar la gracia del SIGTERM.
         # Mata el grupo entero (orquestador + separador). El worker limpia.
-        threading.Thread(target=pipeline.stop, args=(to_stop,), daemon=True).start()
+        threading.Thread(target=runner.stop, args=(to_stop,), daemon=True).start()
         return True
 
     if revert:
@@ -419,14 +419,14 @@ def _wait_for_gpu(jid, min_vram_mb=None):
 
 
 def _cancelled():
-    return pipeline.JobError("cancelled", "cancelled")
+    return runner.JobError("cancelled", "cancelled")
 
 
 def _raise_wait_failed(jid):
     """La espera de GPU no llego: cancelado o sin VRAM a tiempo."""
     if _jobs.get(jid, {}).get("state") == "cancelled":
         raise _cancelled()
-    raise pipeline.JobError("gpu_busy", "GPU busy: not enough free VRAM after "
+    raise runner.JobError("gpu_busy", "GPU busy: not enough free VRAM after "
                             f"{config.GPU_WAIT_TIMEOUT_SEC} s")
 
 
@@ -486,9 +486,9 @@ def _run_separation(job, lib):
 
     inp = lib.input_path(h)
     if inp is None:
-        raise pipeline.JobError("input_missing", "no input audio for this hash")
+        raise runner.JobError("input_missing", "no input audio for this hash")
 
-    pipeline.process(
+    runner.process(
         inp, tmp_stems, job["config"],
         on_proc=lambda p: _current.__setitem__("proc", p))
 
@@ -521,7 +521,7 @@ def _run_lyrics(job, lib):
     h = job["hash"]
     vocals = lib.stems_dir(h) / "vocals.flac"
     if not vocals.exists():
-        raise pipeline.JobError("vocals_missing",
+        raise runner.JobError("vocals_missing",
                                 "vocals.flac not available; process the song first")
 
     # Elegir device: si el server no tiene GPU, degradamos a CPU/int8 igual
@@ -544,7 +544,7 @@ def _run_lyrics(job, lib):
     if isinstance(job.get("config"), dict):
         lang = job["config"].get("language") or None
 
-    pipeline.process_lyrics(
+    runner.process_lyrics(
         vocals, lib.stems_dir(h), language=lang,
         device=device, compute=compute,
         on_proc=lambda p: _current.__setitem__("proc", p))
@@ -581,7 +581,7 @@ def _worker():
             job["state"] = "done"
 
         except Exception as e:
-            if isinstance(e, pipeline.JobTimeout):
+            if isinstance(e, runner.JobTimeout):
                 log.event("job.timeout", job_id=jid, kind=kind)
             was_cancelled = job["state"] == "cancelled"
             job["state"] = "cancelled" if was_cancelled else "error"

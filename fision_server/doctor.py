@@ -167,11 +167,11 @@ def check_weights(models):
     else:
         report("FAIL", "resources/metronome.wav missing")
 
-    import audio_separator_script as sep
+    from fision import separate as sep
     missing = [m for m in sep.ALL_MODELS if not (Path(models["separator"]) / m).is_file()]
     _weights("separation", missing, len(sep.ALL_MODELS))
 
-    import headless_fisionAI as pipe
+    from fision import pipeline as pipe
     ckpts = Path(models["beat_this"]) / "hub" / "checkpoints"
     missing = [c for c in pipe.BEAT_THIS_CHECKPOINTS
                if not (ckpts / f"beat_this-{c}.ckpt").is_file()]
@@ -229,9 +229,8 @@ def check_web():
 
 def model_dirs():
     """Carpetas de pesos efectivas (FISION_MODELS_DIR rellena las tres)."""
-    sys.path.insert(0, str(config.REPO_DIR))
-    import headless_fisionAI  # noqa: F401  (aplica FISION_MODELS_DIR)
-    import audio_separator_script as sep
+    import fision.pipeline  # noqa: F401  (aplica FISION_MODELS_DIR)
+    from fision import separate as sep
     return {
         "separator": sep.model_dir(),
         "Whisper": os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface"),

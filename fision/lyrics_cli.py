@@ -2,7 +2,7 @@
 """
 Fision AI - Lyrics CLI.
 
-Wrapper FINO sobre `headless_fisionAI.run_lyrics`. Se usa en dos escenarios:
+Wrapper FINO sobre `fision.pipeline.run_lyrics`. Se usa en dos escenarios:
 
 - Como subprocess del servidor: cuando el usuario pide letra desde la app,
   el server lo lanza sobre el vocals.flac vigente de la biblioteca.
@@ -11,10 +11,10 @@ Wrapper FINO sobre `headless_fisionAI.run_lyrics`. Se usa en dos escenarios:
 
 Uso:
 
-    python headless_fision_lyrics_CLI.py <vocals> <output_dir> [language]
-                                         [--model NAME]
-                                         [--device cpu|cuda]
-                                         [--compute TYPE]
+    python -m fision.lyrics_cli <vocals> <output_dir> [language]
+                                [--model NAME]
+                                [--device cpu|cuda]
+                                [--compute TYPE]
 
 `language` es un codigo ISO ("en", "es", "fr"...). Si se omite o vale "auto",
 Whisper detecta el idioma solo.
@@ -27,11 +27,12 @@ import sys
 import argparse
 
 # Reutilizamos la funcion del orquestador (una unica fuente de verdad).
-from headless_fisionAI import run_lyrics
+from fision.pipeline import run_lyrics
 
 
 def main():
     p = argparse.ArgumentParser(
+        prog="python -m fision.lyrics_cli",
         description="Fision AI - lyrics transcription of an isolated vocal track")
     p.add_argument("vocals", help="vocals.flac (or any vocal audio)")
     p.add_argument("output_dir", help="Folder where lyrics.json is written")

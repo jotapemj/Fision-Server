@@ -443,7 +443,7 @@ def _effective(var):
     root = os.environ.get("FISION_MODELS_DIR", "").strip()
     sub = {"FISION_SEP_MODEL_DIR": "separator", "HF_HOME": "hf", "TORCH_HOME": "torch"}.get(var)
     if root and sub:
-        # misma regla que headless_fisionAI._apply_models_dir()
+        # misma regla que fision.pipeline._apply_models_dir()
         return os.path.join(os.path.abspath(os.path.expanduser(root)), sub), "derived"
     return None, None
 

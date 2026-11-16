@@ -61,8 +61,8 @@ LOCAL_USER = os.environ.get("FISION_LOCAL_USER", "local").strip().lower()
 # Se deja por compatibilidad, pero auth.py NO lo mira.
 API_TOKEN = os.environ.get("FISION_TOKEN", "").strip()
 
-# Raiz del repo: los CLI por defecto se buscan aqui, no en el directorio de
-# trabajo (arrancar el server desde otra carpeta los perdia).
+# Raiz del repo (BTC, resources, webapp). Los subprocesos `-m fision` la
+# reciben en PYTHONPATH (runner): el cwd del server puede ser otro.
 REPO_DIR = Path(__file__).resolve().parent.parent
 
 # Comando que lanza el orquestador en modo CLI (separacion + beats + chords).
@@ -73,7 +73,7 @@ _LYRICS_CLI = os.environ.get("FISION_LYRICS_CLI", "").strip()
 
 
 def cli_command(input_path, out_dir, config_json):
-    base = _CLI.split() if _CLI else [sys.executable, str(REPO_DIR / "headless_fision_CLI.py")]
+    base = _CLI.split() if _CLI else [sys.executable, "-m", "fision"]
     return base + [str(input_path), str(out_dir), str(config_json)]
 
 
@@ -86,7 +86,7 @@ def lyrics_cli_command(vocals_path, out_dir, language=None, device=None,
     WHISPER_COMPUTE). El worker los sobreescribe cuando degrada a CPU.
     """
     base = (_LYRICS_CLI.split() if _LYRICS_CLI
-            else [sys.executable, str(REPO_DIR / "headless_fision_lyrics_CLI.py")])
+            else [sys.executable, "-m", "fision.lyrics_cli"])
     lang = language or "auto"
     return base + [str(vocals_path), str(out_dir), lang,
                    "--model", WHISPER_MODEL,

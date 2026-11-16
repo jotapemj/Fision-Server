@@ -32,7 +32,7 @@ def _step(label, fn):
 
 
 def fetch_separator():
-    import audio_separator_script as sep
+    from fision import separate as sep
     from audio_separator.separator import Separator
     s = Separator(model_file_dir=sep.model_dir(), info_only=True,
                   log_level=logging.WARNING)
@@ -46,7 +46,7 @@ def fetch_separator():
 
 
 def fetch_beat_this():
-    import headless_fisionAI as pipe
+    from fision import pipeline as pipe
     from beat_this.inference import load_checkpoint
     for c in pipe.BEAT_THIS_CHECKPOINTS:
         print(f"   {c}")

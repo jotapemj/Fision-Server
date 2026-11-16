@@ -1,11 +1,15 @@
-# btc_extractor.py
+# fision/chords.py - acordes con BTC. Lo lanza el pipeline como subproceso:
+#     python -m fision.chords <file_path> <output_dir>
 import os
 import sys
 import torch
 import numpy as np
 import warnings
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+from fision import REPO_DIR, chord_smoothing
+
+# El submodulo BTC vive en la raiz del repo, no en el paquete
+SCRIPT_DIR = str(REPO_DIR)
 BTC_REPO_PATH = os.path.join(SCRIPT_DIR, "BTC-ISMIR19")
 
 if BTC_REPO_PATH not in sys.path:
@@ -15,7 +19,6 @@ if BTC_REPO_PATH not in sys.path:
 from btc_model import *
 from utils import logger
 from utils.mir_eval_modules import audio_file_to_features, idx2chord, idx2voca_chord
-import chord_smoothing
 
 warnings.filterwarnings('ignore')
 logger.logging_verbosity(0)  # Consola limpia
@@ -130,6 +133,6 @@ def main(file_path, carpeta):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python btc_extractor.py <file_path> <output_dir>")
+        print("Usage: python -m fision.chords <file_path> <output_dir>")
         sys.exit(1)
     main(sys.argv[1], sys.argv[2])

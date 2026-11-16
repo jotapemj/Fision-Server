@@ -1,11 +1,11 @@
 """
-Fision AI - audio_separator_script.py
+Fision - fision/separate.py
 
 Motor de separacion dirigido por config JSON. Lo lanza el orquestador como
 subproceso aislado (evita choques de versiones torch/madmom).
 
 Uso:
-    python audio_separator_script.py <input_file> <output_dir> <config.json>
+    python -m fision.separate <input_file> <output_dir> <config.json>
 
 Contrato del config (lo genera el orquestador):
 
@@ -378,7 +378,7 @@ def run(input_file, output_dir, cfg):
 # ------------------------------------------------------------------ MAIN ------
 def main():
     if len(sys.argv) != 4:
-        print("Usage: python audio_separator_script.py <input_file> <output_dir> <config.json>")
+        print("Usage: python -m fision.separate <input_file> <output_dir> <config.json>")
         sys.exit(1)
 
     input_file = sys.argv[1]

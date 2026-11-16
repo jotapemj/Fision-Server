@@ -3,7 +3,7 @@
 Fision AI - CLI.
 
 Wrapper FINO sobre el orquestador. NO duplica la logica del pipeline: importa
-y llama a headless_fisionAI.run_pipeline. Una sola fuente de verdad -> el CLI
+y llama a fision.pipeline.run_pipeline. Una sola fuente de verdad -> el CLI
 hereda TODO lo del orquestador (modo paralelo GPU+beats, deteccion de GPU,
 separador dirigido por sep_config, casteo a MusGlyphs, metronomo nuevo, etc.)
 y nunca se vuelve a desincronizar.
@@ -12,16 +12,15 @@ Importar el orquestador trae el pipeline completo (beats via beat_this en CPU,
 acordes via BTC). Fuente unica de verdad.
 
 Uso manual (a carpeta):
-    python headless_fision_CLI.py <input> <output_dir> [config.json]
-                                  [--device cpu|cuda]
+    python -m fision <input> <output_dir> [config.json] [--device cpu|cuda]
 
 Uso manual (a la biblioteca por hash, igual que el servidor):
-    python headless_fision_CLI.py <input> [config.json] --save-server
+    python -m fision <input> [config.json] --save-server
     (usa FISION_LIBRARY; output_dir se ignora en este modo)
 
 Uso desde el servidor (contrato de 3 argumentos, SIN --save-server: el propio
 servidor hace su commit a la biblioteca):
-    python headless_fision_CLI.py <input> <output_dir> <config.json>
+    python -m fision <input> <output_dir> <config.json>
 
 El config.json puede ser:
   - el sep_config tal cual:
@@ -39,7 +38,7 @@ import json
 import argparse
 
 # Importar el orquestador trae el pipeline (beats via beat_this, acordes via BTC).
-from headless_fisionAI import run_pipeline
+from fision.pipeline import run_pipeline
 
 
 def _load_config(arg):
@@ -65,6 +64,7 @@ def _load_config(arg):
 
 def main():
     p = argparse.ArgumentParser(
+        prog="python -m fision",
         description="Fision AI - full pipeline from the command line")
     p.add_argument("input_file", help="Input audio (mp3/wav/flac...)")
     p.add_argument("output_dir", nargs="?", default=None,
@@ -75,8 +75,6 @@ def main():
                         "If omitted -> classic 2 stems.")
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
                    help="Device (cpu or cuda). The config wins if it sets one.")
-    p.add_argument("--btc", default="btc_extractor.py",
-                   help="Path to the btc_extractor.py script")
     p.add_argument("--save-server", action="store_true", dest="save_server",
                    help="Save to the library by hash, like the server "
                         "(uses FISION_LIBRARY). Ignores output_dir.")
@@ -96,7 +94,7 @@ def main():
         try:
             h, tmp = library.prepare_entry(args.input_file)
             run_pipeline(args.input_file, str(tmp),
-                         device=device, btc_script=args.btc, sep_config=sep_config)
+                         device=device, sep_config=sep_config)
             library.finalize_entry(h, tmp, sep_config,
                                    os.path.basename(args.input_file))
             print(f"\n[library] saved as {h}")
@@ -127,7 +125,6 @@ def main():
     try:
         run_pipeline(args.input_file, args.output_dir,
                      device=device,
-                     btc_script=args.btc,
                      sep_config=sep_config)
     except Exception as e:
         print(f"\n[CLI] ERROR: {e}", file=sys.stderr)

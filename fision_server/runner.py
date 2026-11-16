@@ -1,6 +1,6 @@
 """
-Puente al orquestador. Lo llama como SUBPROCESO (aislado): si revienta, no se
-lleva por delante al servidor.
+Puente al pipeline (paquete `fision`). Lo lanza como SUBPROCESO (aislado):
+si revienta, no se lleva por delante al servidor.
 
 Cada job corre en su propio grupo de procesos: el orquestador lanza a su vez
 el separador como hijo, y cancelar/timeout tiene que matar a todos (si no, el
@@ -11,6 +11,8 @@ import json
 import signal
 import subprocess
 from pathlib import Path
+
+from fision import child_env
 
 from . import config
 
@@ -34,7 +36,8 @@ class JobTimeout(JobError):
 
 def _popen(cmd):
     # Grupo propio en POSIX para poder matar hijos y nietos de golpe
-    return subprocess.Popen(cmd, start_new_session=_POSIX)
+    # child_env: `-m fision` se encuentra aunque el cwd no sea el repo
+    return subprocess.Popen(cmd, start_new_session=_POSIX, env=child_env())
 
 
 def stop(proc, grace=15):

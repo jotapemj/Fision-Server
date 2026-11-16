@@ -95,7 +95,7 @@ it names the problem and the fix.
 
 * **Server** (`fision_server/`): accounts, job queue and the per-user
   library, where each song is stored under the hash of its audio.
-* **Pipeline** (`headless_fisionAI.py`): the audio work, run as an isolated
+* **Pipeline** (`fision/`): the audio work, run as an isolated
   process per job. The server and the CLI call the same pipeline.
 
 <details>
@@ -295,11 +295,12 @@ The pipeline also runs on its own, for quick tests or a single song.
 
 **Command line.** Runs the pipeline on one file. By default it writes to a
 plain folder; `--save-server` stores the result in the library instead
-(`FISION_LIBRARY`, owner `FISION_LOCAL_USER`).
+(`FISION_LIBRARY`, owner `FISION_LOCAL_USER`). Run it from the repository
+root, with the virtual environment active.
 
 ```bash
-python headless_fision_CLI.py <input_audio> <output_dir> [config.json] [--device cpu|cuda]
-python headless_fision_CLI.py <input_audio> [config.json] --save-server   # into the library
+python -m fision <input_audio> <output_dir> [config.json] [--device cpu|cuda]
+python -m fision <input_audio> [config.json] --save-server   # into the library
 ```
 
 **Lyrics.** Once a song has a `vocals.flac`, the same transcription the
@@ -307,7 +308,7 @@ server uses writes `lyrics.json` into `<output_dir>`. `language` is an ISO
 code (`en`, `es`, `fr`...); omit it or pass `auto` to detect it.
 
 ```bash
-python headless_fision_lyrics_CLI.py <vocals.flac> <output_dir> [language]
+python -m fision.lyrics_cli <vocals.flac> <output_dir> [language]
 ```
 
 ## Credits

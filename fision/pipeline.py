@@ -39,9 +39,9 @@ BEAT_THIS_CHECKPOINTS = ("final0", "final1", "final2")
 
 # Rutas del repo, no del directorio de trabajo: el server o un CLI lanzado
 # desde otra carpeta no encontraban los recursos.
-_HERE = Path(__file__).resolve().parent
+from fision import REPO_DIR, child_env
 
-_clic_seg = AudioSegment.from_file(str(_HERE / "resources" / "metronome.wav"))
+_clic_seg = AudioSegment.from_file(str(REPO_DIR / "resources" / "metronome.wav"))
 
 def _extract_cover_bytes(input_file: str):
     """Devuelve bytes de la portada si la hay, None si no. Soporta ID3 (mp3),
@@ -934,7 +934,7 @@ def _simplify_to_triad(chord: str) -> str:
     return root + quality
 
 # ---------- BTC CHORDS ----------
-def run_btc(input_file: str, output_dir: str, btc_script="btc_extractor.py"):
+def run_btc(input_file: str, output_dir: str):
     # Mapa de calidades mir_eval (BTC large voca) -> tu formato corto. Mayor = raiz pelada.
     quality_map = {
         "": "", "maj": "", "min": "m", "maj7": "maj7", "min7": "m7", "7": "7",
@@ -943,10 +943,9 @@ def run_btc(input_file: str, output_dir: str, btc_script="btc_extractor.py"):
     }
     enharmonics = {"A#": "Bb", "C#": "Db", "D#": "Eb", "G#": "Ab"}
 
-    script_path = str(_HERE / btc_script)
-    cmd = [sys.executable, script_path, input_file, str(output_dir)]
+    cmd = [sys.executable, "-m", "fision.chords", input_file, str(output_dir)]
     print("Running BTC Chord Extractor subprocess...")
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, env=child_env())
 
     # BTC nombra el .lab con el stem del audio de entrada
     input_stem = Path(input_file).stem
@@ -1062,7 +1061,7 @@ def _gpu_visible():
         return False
         
 def _write_sep_config(output_dir, sep_config):
-    """Vuelca el sep_config a un JSON que lee audio_separator_script.py."""
+    """Vuelca el sep_config a un JSON que lee fision.separate."""
     import json
     cfg_path = str(Path(output_dir) / "sep_config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -1072,11 +1071,10 @@ def _write_sep_config(output_dir, sep_config):
 
 def start_audio_separator(input_file, output_dir, sep_config, device="cpu"):
     """Lanza el separador SIN bloquear. Devuelve el Popen."""
-    script_path = str(_HERE / "audio_separator_script.py")
     cfg_path = _write_sep_config(output_dir, sep_config)
-    cmd = [sys.executable, script_path, input_file, output_dir, cfg_path]
+    cmd = [sys.executable, "-m", "fision.separate", input_file, output_dir, cfg_path]
 
-    env = os.environ.copy()
+    env = child_env()
     if device != "cuda":
         env["CUDA_VISIBLE_DEVICES"] = "-1"   # CPU de verdad
 
@@ -1096,7 +1094,6 @@ def run_audio_separator(input_file, output_dir, sep_config, device="cpu", on_pro
 
 # ---------- MAIN PIPELINE ----------
 def run_pipeline(input_file: str, output_dir: str, device: str = "cpu",
-                 btc_script: str = "btc_extractor.py",
                  sep_config: dict = None,
                  on_proc=None):
     os.makedirs(output_dir, exist_ok=True)
@@ -1138,7 +1135,7 @@ def run_pipeline(input_file: str, output_dir: str, device: str = "cpu",
     beats_input = input_file
 
     print("\n=== CHORD EXTRACTION (BTC) ===")
-    run_btc(beats_input, output_dir, btc_script)
+    run_btc(beats_input, output_dir)
 
     analyze_chords_file(output_dir)
 

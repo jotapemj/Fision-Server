@@ -16,7 +16,7 @@ from . import library, log
 
 
 def rechord(lib, h):
-    from headless_fisionAI import run_btc, analyze_chords_file   # import pesado
+    from fision.pipeline import run_btc, analyze_chords_file   # import pesado
 
     meta = lib.read_meta(h)
     inp = lib.input_path(h)

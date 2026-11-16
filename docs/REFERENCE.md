@@ -157,8 +157,8 @@ All configuration is read from environment variables.
 | `FISION_CHORDS_OFFBEAT_MULT` | `2.0`                | Multiplier on change costs away from the downbeat and half-bar. |
 | `FISION_MODELS_DIR`      | *(unset)*                | Single root for all model weights: `separator/`, `hf/` and `torch/` subdirectories. See [Model weights](../README.md#model-weights). |
 | `FISION_SEP_MODEL_DIR`   | `$FISION_MODELS_DIR/separator` or `~/.cache/audio-separator-models` | Directory for separation model weights. Downloaded on first use and reused afterwards. |
-| `FISION_CLI`             | `headless_fision_CLI.py` | Command used to invoke the pipeline.               |
-| `FISION_LYRICS_CLI`      | `headless_fision_lyrics_CLI.py` | Command used to invoke the Whisper CLI.     |
+| `FISION_CLI`             | `python -m fision`       | Command used to invoke the pipeline.               |
+| `FISION_LYRICS_CLI`      | `python -m fision.lyrics_cli` | Command used to invoke the Whisper CLI.       |
 
 ### Changing the configuration
 
@@ -533,6 +533,8 @@ It writes the stems (`.flac`) into `output_stems_dir` together with `beats.txt`,
 `downbeats.txt`, `chords*.txt`, the cover `artcover.png` and the metronomes, and
 returns exit code 0 on success. All temporary output must stay inside the
 provided directory so interrupted runs can be cleaned up safely.
+The subprocess runs with the repository root prepended to `PYTHONPATH`, so
+`python -m fision` resolves whatever the server's working directory is.
 
 ## Web app
 
