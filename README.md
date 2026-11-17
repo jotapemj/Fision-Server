@@ -47,7 +47,8 @@ it.
 ## Getting started
 
 1. Start the server with Docker on a Linux machine with an NVIDIA GPU (see
-   [Install](#install)). It also runs on the CPU, much slower.
+   [Install](#install)). AMD GPUs are supported experimentally, and it also
+   runs on the CPU, much slower.
 2. Check the installation and download every model up front (several GB),
    plus the demo song that new accounts receive:
 
@@ -139,8 +140,15 @@ so it does not hold VRAM between jobs.
 ## Install
 
 Docker is the recommended way: the image carries the validated Python,
-PyTorch and CUDA stack, so the host only needs the NVIDIA driver. The native
+PyTorch and GPU stack, so the host only needs the GPU driver. The native
 install suits development and machines without Docker.
+
+| GPU | Docker | PyTorch index (native) |
+|---|---|---|
+| NVIDIA RTX 20xx and newer | `compose.yaml` (published image) | `cu129` |
+| NVIDIA GTX 9xx, 10xx, V100 | `FISION_IMAGE_TAG=cu126` | `cu126` |
+| AMD RX 6800/6900, RX 7000, RX 9000 (experimental) | `compose.rocm.yaml`, built locally; see [AMD GPUs](#amd-gpus-experimental) | `rocm7.2` |
+| None | `compose.cpu.yaml` | `cpu` |
 
 ### Docker
 
@@ -151,6 +159,8 @@ Requirements:
   newer (`docker compose version`).
 * [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
   registered with `sudo nvidia-ctk runtime configure --runtime=docker`.
+  Not needed for AMD cards, which have their own steps in
+  [AMD GPUs](#amd-gpus-experimental).
 * Disk: about 15 GB for the image (4 GB without a GPU), 6 GB for the model
   weights, and room for the library. Docker keeps images under
   `/var/lib/docker`, on the system disk; `data-root` in
